@@ -1,5 +1,9 @@
 {
   "permissions": {
+    "allow": [
+      "Read(//c/Users/Mother/Projects/flynerd/flynerd-agency/app/api/agents/intel/**)",
+      "Read(//c/Users/Mother/Projects/**)"
+    ],
     "additionalDirectories": [
       "c:\\Users\\Mother\\Projects\\flynerd\\flynerd.code-workspace\\sonata-stack\\src"
     ]

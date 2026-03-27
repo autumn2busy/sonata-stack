@@ -1,8 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import Anthropic from "@anthropic-ai/sdk";
 import express from "express";
 import crypto from "node:crypto";
 import { z } from "zod";
+import { buildIntelPrompt } from "./lib/prompts.js";
+import { updateLeadAsAudited } from "./lib/db.js";
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function createServer(): McpServer {
   const server = new McpServer({
@@ -37,8 +42,109 @@ function createServer(): McpServer {
       placeId: z.string().describe("Google Places ID for the business"),
     },
     async ({ businessName, placeId }) => {
-      // TODO: implement reputation analysis
-      return { content: [{ type: "text" as const, text: `Intel stub: analyzing ${businessName} (${placeId})` }] };
+      const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
+      const YELP_API_KEY = process.env.YELP_API_KEY;
+
+      if (!GOOGLE_PLACES_API_KEY && !YELP_API_KEY) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Missing both GOOGLE_PLACES_API_KEY and YELP_API_KEY" }],
+          isError: true,
+        };
+      }
+
+      // ── 1. Fetch reviews ──────────────────────────
+      let reviews: Array<{ rating: number; text: { text: string } }> = [];
+      let rating = 0;
+      let userRatingCount = 0;
+
+      if (GOOGLE_PLACES_API_KEY) {
+        const placesRes = await fetch(
+          `https://places.googleapis.com/v1/places/${placeId}?languageCode=en`,
+          {
+            method: "GET",
+            headers: {
+              "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+              "X-Goog-FieldMask": "reviews,rating,userRatingCount",
+            },
+          }
+        );
+        if (placesRes.ok) {
+          const data = await placesRes.json() as any;
+          reviews = data.reviews || [];
+          rating = data.rating || 0;
+          userRatingCount = data.userRatingCount || 0;
+        }
+      } else if (YELP_API_KEY) {
+        const yelpRes = await fetch(
+          `https://api.yelp.com/v3/businesses/${placeId}/reviews`,
+          { headers: { Authorization: `Bearer ${YELP_API_KEY}` } }
+        );
+        if (yelpRes.ok) {
+          const data = await yelpRes.json() as any;
+          reviews = data.reviews || [];
+          rating = 4.0;
+        }
+      }
+
+      // ── 2. Prepare reviews text ───────────────────
+      const reviewsText =
+        reviews.length > 0
+          ? reviews
+              .map((r: any) => `Review (${r.rating} stars): ${r.text?.text || "No text"}`)
+              .join("\n")
+          : "No reviews available.";
+
+      // ── 3. AI analysis ────────────────────────────
+      const systemPrompt = buildIntelPrompt({
+        businessName,
+        rating,
+        reviewCount: userRatingCount || reviews.length,
+        contextHint: "No official website detected.",
+        reviewsText,
+      });
+
+      const completion = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: "user", content: "Analyze this business and return the JSON." }],
+      });
+
+      const aiRaw =
+        completion.content[0]?.type === "text"
+          ? completion.content[0].text.trim()
+          : "{}";
+      const analysis = JSON.parse(aiRaw);
+
+      // ── 4. Persist to DB ──────────────────────────
+      try {
+        await updateLeadAsAudited(placeId, analysis.opportunityScore || 50, {
+          rating,
+          reviewCount: userRatingCount || reviews.length,
+          painPoints: analysis.painPoints || [],
+          reputationSummary: analysis.reputationSummary || "",
+        });
+      } catch (dbErr: any) {
+        console.error("DB update failed (non-fatal):", dbErr.message);
+      }
+
+      // ── 5. Return full intel payload ──────────────
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              opportunityScore: analysis.opportunityScore ?? 0,
+              painPoints: analysis.painPoints ?? [],
+              reputationSummary: analysis.reputationSummary ?? "",
+              operatingContext: analysis.operatingContext ?? "",
+              socialProofPoints: analysis.socialProofPoints ?? [],
+              brandPalettes: analysis.brandPalettes ?? [],
+              selectedPalette: analysis.selectedPalette ?? null,
+            }),
+          },
+        ],
+      };
     }
   );
 
