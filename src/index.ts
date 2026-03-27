@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
+import crypto from "node:crypto";
 import { z } from "zod";
 
 const server = new McpServer({
@@ -149,7 +150,7 @@ server.tool(
 // internally. See src/webhook.ts (to be created).
 
 // ─────────────────────────────────────────────
-// Start — Express + SSE
+// Start — Express + Streamable HTTP
 // ─────────────────────────────────────────────
 const ROSTER = [
   "simon_cowell", "yonce", "dre", "hov",
@@ -162,8 +163,9 @@ app.use(express.json());
 // CORS — allow Claude.ai and other MCP clients to connect cross-origin
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
+  res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
   next();
 });
 
@@ -180,12 +182,47 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", name: "sonata-stack", roster: [...ROSTER] });
 });
 
-app.all("/mcp", async (req, res) => {
+const transports = new Map<string, StreamableHTTPServerTransport>();
+
+app.post("/mcp", async (req, res) => {
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+  // Existing session — forward the request
+  if (sessionId && transports.has(sessionId)) {
+    await transports.get(sessionId)!.handleRequest(req, res);
+    return;
+  }
+
+  // New session — create transport, wire it up
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
+    sessionIdGenerator: () => crypto.randomUUID(),
   });
+  transport.onclose = () => {
+    if (transport.sessionId) transports.delete(transport.sessionId);
+  };
   await server.connect(transport);
   await transport.handleRequest(req, res);
+  if (transport.sessionId) {
+    transports.set(transport.sessionId, transport);
+  }
+});
+
+app.get("/mcp", async (req, res) => {
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  if (!sessionId || !transports.has(sessionId)) {
+    res.status(400).json({ error: "Invalid or missing session ID" });
+    return;
+  }
+  await transports.get(sessionId)!.handleRequest(req, res);
+});
+
+app.delete("/mcp", async (req, res) => {
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  if (!sessionId || !transports.has(sessionId)) {
+    res.status(400).json({ error: "Invalid or missing session ID" });
+    return;
+  }
+  await transports.get(sessionId)!.handleRequest(req, res);
 });
 
 const PORT = process.env.PORT || 8080;
