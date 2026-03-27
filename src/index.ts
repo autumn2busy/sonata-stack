@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from "express";
 import { z } from "zod";
 
 const server = new McpServer({
@@ -7,9 +8,9 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 1. Simon Cowell — Scout
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "simon_cowell",
   "Discovers local service businesses by niche and city using Google Places and Yelp. Finds businesses with no website or weak digital presence. Returns a list of leads to process. Run this to fill the top of the funnel.",
@@ -23,9 +24,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 2. Yoncé — Intel
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "yonce",
   "Analyzes a business's online reputation using their reviews and Google Places data. Returns opportunityScore (0-100), painPoints, reputationSummary, brandPalettes, and socialProofPoints. Run after Simon Cowell discovers a lead.",
@@ -39,9 +40,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 3. Dre — Builder
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "dre",
   "Deploys a personalized demo website for a lead using the Vercel API and generates an AI avatar walkthrough video via HeyGen. Run after Yoncé scores a lead above 50.",
@@ -59,9 +60,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 4. Hov — Closer
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "hov",
   "Writes and sends a personalized 1:1 sales email as Jordan, FlyNerd's senior sales executive. Pulls from the FlyNerd knowledge base. Moves the AC deal to Negotiating. Run when a prospect replies to outreach.",
@@ -76,9 +77,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 5. Tiny Harris — Growth
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "tiny_harris",
   "Monthly growth and nurture agent for active clients. Generates performance reports, checks site health, and updates ActiveCampaign. Run once per month per client.",
@@ -91,9 +92,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 6. Cersei — Expire
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "cersei",
   "Enforces demo expiry. Finds all demo sites older than 7 days and enables Vercel password protection. Creates scarcity. Runs hourly via webhook. She always pays her debts.",
@@ -104,9 +105,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 7. Tyrion — Orchestrator
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "tyrion",
   "Master orchestrator. Coordinates the full outbound pipeline: runs Simon Cowell to find leads, passes to Yoncé for scoring, sends qualified leads to Dre for building, then triggers outreach. The smartest agent in the room.",
@@ -121,9 +122,9 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // 8. Kris Jenner — Post-Call Closer Asset
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 server.tool(
   "kris_jenner",
   "Post-strategy-call closer asset builder. Triggered by AC tag call_completed. Runs Yoncé on the prospect's actual website, builds a personalized demo via Dre, populates DEAL_DEMOSITEURL, and sends the close email. Turns the strategy call into a brand deal.",
@@ -138,25 +139,52 @@ server.tool(
   }
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // Webhook: POST /webhook/post-call
 // Triggers kris_jenner when AC fires call_completed
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // Note: MCP servers use stdio transport. For webhook ingress,
 // deploy a lightweight HTTP listener (e.g. Express or Hono)
 // that validates WEBHOOK_SECRET and invokes kris_jenner
 // internally. See src/webhook.ts (to be created).
 
-// ──────────────────────────────────────────────
-// Start
-// ──────────────────────────────────────────────
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Sonata Stack MCP server running on stdio");
-}
+// ─────────────────────────────────────────────
+// Start — Express + SSE
+// ─────────────────────────────────────────────
+const ROSTER = [
+  "simon_cowell", "yonce", "dre", "hov",
+  "tiny_harris", "cersei", "tyrion", "kris_jenner",
+] as const;
 
-main().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exit(1);
+const app = express();
+app.use(express.json());
+
+const transports: Record<string, SSEServerTransport> = {};
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", name: "sonata-stack", roster: [...ROSTER] });
+});
+
+app.get("/sse", async (req, res) => {
+  const transport = new SSEServerTransport("/messages", res);
+  transports[transport.sessionId] = transport;
+  res.on("close", () => {
+    delete transports[transport.sessionId];
+  });
+  await server.connect(transport);
+});
+
+app.post("/messages", async (req, res) => {
+  const sessionId = req.query.sessionId as string;
+  const transport = transports[sessionId];
+  if (!transport) {
+    res.status(400).json({ error: "Unknown session" });
+    return;
+  }
+  await transport.handlePostMessage(req, res);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Sonata Stack MCP server listening on port ${PORT}`);
 });
