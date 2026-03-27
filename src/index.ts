@@ -167,9 +167,13 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Preflight
-app.options("*", (_req, res) => {
-  res.sendStatus(204);
+// Preflight for any route. Express 5 rejects bare "*" route patterns.
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
 });
 
 const transports: Record<string, SSEServerTransport> = {};
