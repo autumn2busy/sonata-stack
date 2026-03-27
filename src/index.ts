@@ -159,6 +159,19 @@ const ROSTER = [
 const app = express();
 app.use(express.json());
 
+// CORS — allow Claude.ai and other MCP clients to connect cross-origin
+app.use((_req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  next();
+});
+
+// Preflight
+app.options("*", (_req, res) => {
+  res.sendStatus(204);
+});
+
 const transports: Record<string, SSEServerTransport> = {};
 
 app.get("/health", (_req, res) => {
@@ -166,6 +179,16 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/sse", async (req, res) => {
+  const transport = new SSEServerTransport("/messages", res);
+  transports[transport.sessionId] = transport;
+  res.on("close", () => {
+    delete transports[transport.sessionId];
+  });
+  await server.connect(transport);
+});
+
+// Alias — some MCP clients connect via /mcp instead of /sse
+app.get("/mcp", async (_req, res) => {
   const transport = new SSEServerTransport("/messages", res);
   transports[transport.sessionId] = transport;
   res.on("close", () => {
