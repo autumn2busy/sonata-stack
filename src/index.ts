@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import { z } from "zod";
 
@@ -176,42 +176,19 @@ app.use((req, res, next) => {
   next();
 });
 
-const transports: Record<string, SSEServerTransport> = {};
-
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", name: "sonata-stack", roster: [...ROSTER] });
 });
 
-app.get("/sse", async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  transports[transport.sessionId] = transport;
-  res.on("close", () => {
-    delete transports[transport.sessionId];
+app.all("/mcp", async (req, res) => {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
   });
   await server.connect(transport);
+  await transport.handleRequest(req, res);
 });
 
-// Alias — some MCP clients connect via /mcp instead of /sse
-app.get("/mcp", async (_req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  transports[transport.sessionId] = transport;
-  res.on("close", () => {
-    delete transports[transport.sessionId];
-  });
-  await server.connect(transport);
-});
-
-app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId as string;
-  const transport = transports[sessionId];
-  if (!transport) {
-    res.status(400).json({ error: "Unknown session" });
-    return;
-  }
-  await transport.handlePostMessage(req, res);
-});
-
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Sonata Stack MCP server listening on port ${PORT}`);
 });
