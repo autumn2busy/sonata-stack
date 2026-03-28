@@ -115,7 +115,9 @@ function createServer(): McpServer {
         completion.content[0]?.type === "text"
           ? completion.content[0].text.trim()
           : "{}";
-      const analysis = JSON.parse(aiRaw);
+      // Claude sometimes wraps JSON in ```json ... ``` fences — strip them
+      const cleanJson = aiRaw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?\s*```$/i, "");
+      const analysis = JSON.parse(cleanJson);
 
       // ── 4. Persist to DB (only when leadId is provided) ──
       if (leadId) {
