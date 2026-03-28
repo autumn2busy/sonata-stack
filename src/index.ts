@@ -40,8 +40,9 @@ function createServer(): McpServer {
     {
       businessName: z.string().describe("Name of the business to analyze"),
       placeId: z.string().describe("Google Places ID for the business"),
+      leadId: z.string().optional().describe("Internal lead ID for DB persistence. If omitted, analysis is returned without saving."),
     },
-    async ({ businessName, placeId }) => {
+    async ({ businessName, placeId, leadId }) => {
       const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
       const YELP_API_KEY = process.env.YELP_API_KEY;
 
@@ -116,16 +117,18 @@ function createServer(): McpServer {
           : "{}";
       const analysis = JSON.parse(aiRaw);
 
-      // ── 4. Persist to DB ──────────────────────────
-      try {
-        await updateLeadAsAudited(placeId, analysis.opportunityScore || 50, {
-          rating,
-          reviewCount: userRatingCount || reviews.length,
-          painPoints: analysis.painPoints || [],
-          reputationSummary: analysis.reputationSummary || "",
-        });
-      } catch (dbErr: any) {
-        console.error("DB update failed (non-fatal):", dbErr.message);
+      // ── 4. Persist to DB (only when leadId is provided) ──
+      if (leadId) {
+        try {
+          await updateLeadAsAudited(leadId, analysis.opportunityScore || 50, {
+            rating,
+            reviewCount: userRatingCount || reviews.length,
+            painPoints: analysis.painPoints || [],
+            reputationSummary: analysis.reputationSummary || "",
+          });
+        } catch (dbErr: any) {
+          console.error("DB update failed (non-fatal):", dbErr.message);
+        }
       }
 
       // ── 5. Return full intel payload ──────────────
