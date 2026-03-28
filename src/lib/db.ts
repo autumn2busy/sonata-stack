@@ -1,10 +1,21 @@
 // Supabase client — Sonata Stack
-import { createClient } from "@supabase/supabase-js";
+// Lazy-initialized: the server starts even when SUPABASE_URL is not set.
+// DB writes simply fail gracefully (yonce gates on leadId being present).
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+let _supabase: SupabaseClient | null = null;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+function getSupabase(): SupabaseClient {
+  if (!_supabase) {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) {
+      throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for DB operations");
+    }
+    _supabase = createClient(url, key);
+  }
+  return _supabase;
+}
 
 export async function updateLeadAsAudited(
   leadId: string,
@@ -16,6 +27,7 @@ export async function updateLeadAsAudited(
     reputationSummary: string;
   }
 ) {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from("agency_leads")
     .update({
