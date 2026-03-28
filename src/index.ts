@@ -271,7 +271,9 @@ const ROSTER = [
 ] as const;
 
 const app = express();
-app.use(express.json());
+// NOTE: Do NOT use express.json() globally — StreamableHTTPServerTransport
+// reads the raw request body itself. A global body parser consumes the stream
+// before the transport can read it, causing "Parse error: Invalid JSON".
 
 // CORS — allow Claude.ai and other MCP clients to connect cross-origin
 app.use((_req, res, next) => {
