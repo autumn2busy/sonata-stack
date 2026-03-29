@@ -29,7 +29,7 @@ export async function updateLeadAsAudited(
 ) {
   const supabase = getSupabase();
   const { data, error } = await supabase
-    .from("agency_leads")
+    .from("AgencyLead")
     .update({
       status: "AUDITED",
       intel_score: intelScore,
@@ -54,7 +54,7 @@ export async function updateLeadAsBuilt(
 ) {
   const supabase = getSupabase();
   const { data, error } = await supabase
-    .from("agency_leads")
+    .from("AgencyLead")
     .update({
       status: "BUILT",
       demo_site_url: updates.demoSiteUrl,
@@ -73,7 +73,7 @@ export async function updateLeadAsBuilt(
 export async function getLeadById(leadId: string) {
   const supabase = getSupabase();
   const { data, error } = await supabase
-    .from("agency_leads")
+    .from("AgencyLead")
     .select("*")
     .eq("id", leadId)
     .single();
