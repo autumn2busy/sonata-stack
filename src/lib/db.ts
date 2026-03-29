@@ -42,3 +42,42 @@ export async function updateLeadAsAudited(
   if (error) throw new Error(`Supabase update failed: ${error.message}`);
   return data;
 }
+
+export async function updateLeadAsBuilt(
+  leadId: string,
+  updates: {
+    demoSiteUrl: string;
+    walkthroughVideoUrl?: string;
+    validUntil: string; // ISO 8601
+    intelData: Record<string, unknown>;
+  }
+) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("agency_leads")
+    .update({
+      status: "BUILT",
+      demo_site_url: updates.demoSiteUrl,
+      walkthrough_video_url: updates.walkthroughVideoUrl || null,
+      valid_until: updates.validUntil,
+      intel_data: updates.intelData,
+    })
+    .eq("id", leadId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Supabase update failed: ${error.message}`);
+  return data;
+}
+
+export async function getLeadById(leadId: string) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("agency_leads")
+    .select("*")
+    .eq("id", leadId)
+    .single();
+
+  if (error) throw new Error(`Supabase read failed: ${error.message}`);
+  return data;
+}

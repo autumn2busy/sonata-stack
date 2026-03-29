@@ -5,7 +5,9 @@ import express from "express";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { buildIntelPrompt } from "./lib/prompts.js";
-import { updateLeadAsAudited } from "./lib/db.js";
+import { updateLeadAsAudited, updateLeadAsBuilt, getLeadById } from "./lib/db.js";
+import { getCanonicalDemoUrl, triggerDeploy } from "./lib/vercel.js";
+import { generateAvatarVideo, buildVideoScript } from "./lib/heygen.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -91,8 +93,8 @@ function createServer(): McpServer {
       const reviewsText =
         reviews.length > 0
           ? reviews
-              .map((r: any) => `Review (${r.rating} stars): ${r.text?.text || "No text"}`)
-              .join("\n")
+            .map((r: any) => `Review (${r.rating} stars): ${r.text?.text || "No text"}`)
+            .join("\n")
           : "No reviews available.";
 
       // ── 3. AI analysis ────────────────────────────
@@ -160,16 +162,129 @@ function createServer(): McpServer {
     "dre",
     "Deploys a personalized demo website for a lead using the Vercel API and generates an AI avatar walkthrough video via HeyGen. Run after Yoncé scores a lead above 50.",
     {
-      leadId: z.string().describe("Internal lead ID"),
+      leadId: z.string().describe("Internal lead ID (must exist in Supabase)"),
       businessName: z.string().describe("Name of the business"),
-      brandPalette: z.object({
-        primary: z.string(),
-        secondary: z.string(),
-      }).describe("Brand color palette from Yoncé analysis"),
+      niche: z.string().describe("Business niche (e.g. 'plumber', 'barbershop')"),
+      rating: z.number().describe("Google/Yelp star rating"),
+      intelPayload: z.object({
+        opportunityScore: z.number(),
+        painPoints: z.array(z.string()),
+        reputationSummary: z.string(),
+        operatingContext: z.string(),
+        socialProofPoints: z.array(z.string()),
+        selectedPalette: z.object({
+          name: z.string(),
+          primary: z.string(),
+          accent: z.string(),
+          rationale: z.string(),
+        }),
+        brandPalettes: z.array(z.object({
+          name: z.string(),
+          primary: z.string(),
+          accent: z.string(),
+          rationale: z.string(),
+        })),
+      }).describe("Full yonce output payload"),
     },
-    async ({ leadId, businessName }) => {
-      // TODO: implement Vercel deploy + HeyGen video
-      return { content: [{ type: "text" as const, text: `Builder stub: deploying demo for ${businessName} (${leadId})` }] };
+    async ({ leadId, businessName, niche, rating, intelPayload }) => {
+      try {
+        // ── 1. Map yonce output to the template's expected format ──
+        // The demo template reads intelData.brandColors.{primary,accent}
+        // but yonce outputs selectedPalette.{primary,accent}
+        const intelDataForTemplate = {
+          painPoints: intelPayload.painPoints,
+          socialProofPoints: intelPayload.socialProofPoints,
+          operatingContext: intelPayload.operatingContext,
+          reputationSummary: intelPayload.reputationSummary,
+          opportunityScore: intelPayload.opportunityScore,
+          brandPalettes: intelPayload.brandPalettes,
+          // ← THIS is the key mapping the template reads
+          brandColors: {
+            primary: intelPayload.selectedPalette.primary,
+            accent: intelPayload.selectedPalette.accent,
+          },
+          rating,
+        };
+
+        // ── 2. Build the canonical demo URL ──
+        const demoSiteUrl = getCanonicalDemoUrl(leadId);
+
+        // ── 3. Set 7-day expiry ──
+        const validUntil = new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000
+        ).toISOString();
+
+        // ── 4. Write to Supabase (updates status to BUILT) ──
+        await updateLeadAsBuilt(leadId, {
+          demoSiteUrl,
+          validUntil,
+          intelData: intelDataForTemplate,
+        });
+
+        // ── 5. Trigger Vercel redeploy so the template picks up new data ──
+        const deployed = await triggerDeploy();
+
+        // ── 6. Generate HeyGen video (async — don't block on it) ──
+        // Fire and forget: the video takes ~5-10 min to generate.
+        // We start it now and update the DB when it completes.
+        const videoScript = buildVideoScript({
+          businessName,
+          niche,
+          rating,
+          painPoints: intelPayload.painPoints,
+          operatingContext: intelPayload.operatingContext,
+        });
+
+        // Don't await — let it run in the background
+        generateAvatarVideo(videoScript, businessName)
+          .then(async (videoUrl) => {
+            if (videoUrl) {
+              try {
+                const { createClient } = await import("@supabase/supabase-js");
+                const url = process.env.SUPABASE_URL;
+                const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+                if (url && key) {
+                  const sb = createClient(url, key);
+                  await sb
+                    .from("agency_leads")
+                    .update({ walkthrough_video_url: videoUrl })
+                    .eq("id", leadId);
+                  console.log(`[Dre] Video URL saved for ${businessName}: ${videoUrl}`);
+                }
+              } catch (err) {
+                console.error("[Dre] Failed to save video URL:", err);
+              }
+            }
+          })
+          .catch((err) => console.error("[Dre] HeyGen error (non-fatal):", err));
+
+        // ── 7. Return result ──
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "BUILT",
+                leadId,
+                businessName,
+                demoSiteUrl,
+                validUntil,
+                deployTriggered: deployed,
+                videoStatus: "generating",
+                videoScript: videoScript.substring(0, 100) + "...",
+                brandColors: intelDataForTemplate.brandColors,
+              }),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [
+            { type: "text" as const, text: `Dre error: ${err.message}` },
+          ],
+          isError: true,
+        };
+      }
     }
   );
 
