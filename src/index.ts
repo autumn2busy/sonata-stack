@@ -247,7 +247,7 @@ function createServer(): McpServer {
                   const sb = createClient(url, key);
                   await sb
                     .from("AgencyLead")
-                    .update({ walkthrough_video_url: videoUrl })
+                    .update({ walkthroughVideoUrl: videoUrl })
                     .eq("id", leadId);
                   console.log(`[Dre] Video URL saved for ${businessName}: ${videoUrl}`);
                 }

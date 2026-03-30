@@ -48,7 +48,7 @@ export async function triggerDeploy(): Promise<boolean> {
                     target: "production",
                     gitSource: {
                         type: "github",
-                        repo: "autumn2busy/FN-real-estate",
+                        repo: "autumn2busy/flynerd_agency",
                         ref: "main",
                     },
                 }),

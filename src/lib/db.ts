@@ -32,8 +32,8 @@ export async function updateLeadAsAudited(
     .from("AgencyLead")
     .update({
       status: "AUDITED",
-      intel_score: intelScore,
-      intel_data: intelData,
+      intelScore,
+      intelData,
     })
     .eq("id", leadId)
     .select()
@@ -57,10 +57,10 @@ export async function updateLeadAsBuilt(
     .from("AgencyLead")
     .update({
       status: "BUILT",
-      demo_site_url: updates.demoSiteUrl,
-      walkthrough_video_url: updates.walkthroughVideoUrl || null,
-      valid_until: updates.validUntil,
-      intel_data: updates.intelData,
+      demoSiteUrl: updates.demoSiteUrl,
+      walkthroughVideoUrl: updates.walkthroughVideoUrl || null,
+      validUntil: updates.validUntil,
+      intelData: updates.intelData,
     })
     .eq("id", leadId)
     .select()
