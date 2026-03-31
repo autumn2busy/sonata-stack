@@ -165,45 +165,37 @@ function createServer(): McpServer {
       leadId: z.string().describe("Internal lead ID (must exist in Supabase)"),
       businessName: z.string().describe("Name of the business"),
       niche: z.string().describe("Business niche (e.g. 'plumber', 'barbershop')"),
-      rating: z.number().describe("Google/Yelp star rating"),
-      intelPayload: z.object({
-        opportunityScore: z.number(),
-        painPoints: z.array(z.string()),
-        reputationSummary: z.string(),
-        operatingContext: z.string(),
-        socialProofPoints: z.array(z.string()),
-        selectedPalette: z.object({
-          name: z.string(),
-          primary: z.string(),
-          accent: z.string(),
-          rationale: z.string(),
-        }),
-        brandPalettes: z.array(z.object({
-          name: z.string(),
-          primary: z.string(),
-          accent: z.string(),
-          rationale: z.string(),
-        })),
-      }).describe("Full yonce output payload"),
+      rating: z.any().optional().describe("Google/Yelp star rating"),
+      intelPayload: z.any().describe("Full yonce output payload"),
     },
     async ({ leadId, businessName, niche, rating, intelPayload }) => {
       try {
+        const ratingNumber =
+          typeof rating === "number"
+            ? rating
+            : Number.parseFloat(String(rating ?? "0")) || 0;
+        const payload = (intelPayload && typeof intelPayload === "object") ? intelPayload as any : {};
+        const painPoints = Array.isArray(payload.painPoints) ? payload.painPoints : [];
+        const socialProofPoints = Array.isArray(payload.socialProofPoints) ? payload.socialProofPoints : [];
+        const brandPalettes = Array.isArray(payload.brandPalettes) ? payload.brandPalettes : [];
+        const selectedPalette = payload.selectedPalette ?? brandPalettes[0] ?? null;
+
         // ── 1. Map yonce output to the template's expected format ──
         // The demo template reads intelData.brandColors.{primary,accent}
         // but yonce outputs selectedPalette.{primary,accent}
         const intelDataForTemplate = {
-          painPoints: intelPayload.painPoints,
-          socialProofPoints: intelPayload.socialProofPoints,
-          operatingContext: intelPayload.operatingContext,
-          reputationSummary: intelPayload.reputationSummary,
-          opportunityScore: intelPayload.opportunityScore,
-          brandPalettes: intelPayload.brandPalettes,
+          painPoints,
+          socialProofPoints,
+          operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
+          reputationSummary: typeof payload.reputationSummary === "string" ? payload.reputationSummary : "",
+          opportunityScore: typeof payload.opportunityScore === "number" ? payload.opportunityScore : 0,
+          brandPalettes,
           // ← THIS is the key mapping the template reads
           brandColors: {
-            primary: intelPayload.selectedPalette.primary,
-            accent: intelPayload.selectedPalette.accent,
+            primary: selectedPalette?.primary ?? "1B365D",
+            accent: selectedPalette?.accent ?? "D4AF37",
           },
-          rating,
+          rating: ratingNumber,
         };
 
         // ── 2. Build the canonical demo URL ──
@@ -230,9 +222,9 @@ function createServer(): McpServer {
         const videoScript = buildVideoScript({
           businessName,
           niche,
-          rating,
-          painPoints: intelPayload.painPoints,
-          operatingContext: intelPayload.operatingContext,
+          rating: ratingNumber,
+          painPoints,
+          operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
         });
 
         // Don't await — let it run in the background
@@ -278,6 +270,7 @@ function createServer(): McpServer {
           ],
         };
       } catch (err: any) {
+        console.error("[Dre] Unhandled error:", err);
         return {
           content: [
             { type: "text" as const, text: `Dre error: ${err.message}` },
