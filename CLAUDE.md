@@ -1,79 +1,89 @@
-### 1. Plan Node Default
+# Sonata Stack — MCP Agent Core
 
-Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+## Project role
+MCP server — the agent core for FlyNerd's outbound automation pipeline.
+Deployed to Railway, always-on.
 
-If something goes sideways, STOP and re-plan immediately don't keep pushing
+## The Roster
+Simon Cowell, Yoncé, Dre, Hov, Tiny Harris, Cersei, Tyrion, Kris Jenner
 
-Use plan mode for verification steps, not just building
+## Architecture rules
+- All outbound agent logic lives HERE, not in flynerd-agency
+- flynerd-agency calls Sonata Stack via MCP — never the reverse
+- Package manager: npm
 
-Write detailed specs upfront to reduce ambiguity
+## Related repos
+- **The Face:** flynerd-agency (marketing site + demo widget)
+- **The Brain:** flynerdtech (client demo site template)
 
-### 2. Subagent Strategy
+---
 
-Use subagents liberally to keep main contect window clean
+## Development Standards
 
-Offload research, exploration, and parallel analysis to subagents
+### Plan First
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately
+- Write detailed specs upfront to reduce ambiguity
 
-For complex problens, throw more compute at it via subagents
+### Subagent Strategy
+- Use subagents liberally to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- One task per subagent for focused execution
 
-One tack per subagent for focused execution
+### Self-Improvement Loop
+- After ANY correction from the user: update tasks/lessons.md with the pattern
+- Write rules for yourself that prevent the same mistake
+- Review lessons at session start for relevant project
 
-### 3. Self-Improvement Loop
+### Verification Before Done
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
 
-After ANY correction from the user: update tasks/lessons.md with the pattern
+### Demand Elegance (Balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- Skip this for simple, obvious fixes — don't over-engineer
 
-Write rules for yourself that prevent the same mistake
-
-Ruthlessly iterate on these lessons until mistake rate drops
-
-Review lessons at session start for relevant project
-
-### 4. Verification Before Done
-
-Never mark a task complete without proving it works
-
-Diff behavior between main and your changes when relevant
-
-Ask yourself: "Would a staff engineer approve this?"
-
-Run tests, check logs, demonstrate correctness
-
-### 5. Demand Elegance (Balanced)
-
-For non-trivial changes: pause and ask "is there a more elegant way?"
-
-If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-
-Skip this for simple, chvious fixes don't over-engineer
-
-Challenge your own work before presenting it
-
-### 6. Autonomous Bug Fixing
-
-When given a bug report: just fix it. Don't ask for hand-holding
-
-Point at logs, errors, failing tests then resolve them
-
-Zero context switching required from the user
-
-Go fix failing CI tests without being told how
+### Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests then resolve them
 
 ## Task Management
-
-1. *Plan First*: Write plan to tasks/todo.md with checkable items
-
-2. Verify Plan**: Check in before starting implementation
-
-3. *Track Progress*: Mark items complete as you go
-
-4. *Explain Changes*: High-level summary at each step
-
-5. *Document Results*: Add review section to tasks/todo.md
-
-6. *Capture Lessons*: Update tasks/lessons.md after corrections
+1. Write plan to tasks/todo.md with checkable items
+2. Check in before starting implementation
+3. Mark items complete as you go
+4. High-level summary at each step
+5. Add review section to tasks/todo.md
+6. Update tasks/lessons.md after corrections
 
 ## Core Principles
+- **Simplicity First:** Make every change as simple as possible. Impact minimal code.
+- **No Laziness:** Find root causes. No temporary fixes. Senior developer standards.
 
-*Simplicity First*: Make every change as simple as possible. Inpact minimal code.
+---
 
-*No Laziness*: Find root causes. No temporary fixes. Senior developer standards.
+## Change Logging
+
+After completing any task that modifies files, create or append to:
+`C:/Users/Mother/Vault/command-center/00-Inbox/changelog-sonata.md`
+
+Format each entry as:
+
+```
+### YYYY-MM-DD — [brief title]
+**Repo:** sonata-stack
+
+**Files changed:**
+- path/to/file.ts — what changed and why
+
+**Decisions made:**
+- any choices or tradeoffs
+
+**Notes:**
+- anything the owner should know
+
+---
+```
+
+Always append to the end of the file. Never overwrite previous entries.
