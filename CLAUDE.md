@@ -81,7 +81,9 @@ The Supabase database uses **quoted camelCase** identifiers, NOT snake_case:
 4. **Explain Changes**: High-level summary at each step
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
-
+Before modifying ANY Supabase query, READ docs/Architecture/AgencyLead Schema.md first.
+Before debugging ANY agent failure, READ docs/Playbooks/Debugging Playbook.md first.
+Before implementing ANY agent, READ docs/Pipelines/Pipeline - Full Outbound.md first.
 ---
 
 ## Core Principles
