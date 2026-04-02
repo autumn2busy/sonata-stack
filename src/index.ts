@@ -8,6 +8,9 @@ import { buildIntelPrompt } from "./lib/prompts.js";
 import { updateLeadAsAudited, updateLeadAsBuilt, getLeadById, insertLead, getExpiredLeads, updateLeadStatus } from "./lib/db.js";
 import { getCanonicalDemoUrl, triggerDeploy, passwordProtectDeployment } from "./lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "./lib/heygen.js";
+import { runKendrickAudit } from "./agents/kendrick.js";
+import { runTinyHarrisReport } from "./agents/tiny.js";
+import { runKrisJennerClose } from "./agents/kris.js";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -416,8 +419,17 @@ function createServer(): McpServer {
       clientId: z.string().describe("Active client ID"),
     },
     async ({ clientId }) => {
-      // TODO: implement monthly growth report + AC update
-      return { content: [{ type: "text" as const, text: `Growth stub: running monthly report for client ${clientId}` }] };
+      try {
+        const reportResult = await runTinyHarrisReport();
+        return { 
+          content: [{ 
+            type: "text" as const, 
+            text: JSON.stringify(reportResult) 
+          }] 
+        };
+      } catch (err: any) {
+        return { content: [{ type: "text" as const, text: `Tiny Harris Error: ${err.message}` }], isError: true };
+      }
     }
   );
 
@@ -502,8 +514,43 @@ function createServer(): McpServer {
       websiteUrl: z.string().describe("Prospect's current website URL"),
     },
     async ({ contactId, dealId, websiteUrl }) => {
-      // TODO: implement post-call closer pipeline
-      return { content: [{ type: "text" as const, text: `Post-Call stub: building closer assets for deal ${dealId} (${websiteUrl})` }] };
+      try {
+        const closeAsset = await runKrisJennerClose({ contactId, dealId, websiteUrl });
+        return { 
+          content: [{ 
+            type: "text" as const, 
+            text: JSON.stringify(closeAsset) 
+          }] 
+        };
+      } catch (err: any) {
+        return { content: [{ type: "text" as const, text: `Kris Error: ${err.message}` }], isError: true };
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────
+  // 9. Kendrick — SEO Orchestrator
+  // ─────────────────────────────────────────────
+  server.tool(
+    "kendrick",
+    "Tier 3 SEO & AEO execution architect. Opens headless Chrome (Puppeteer) to rip real-time DOM metrics, detects semantic weaknesses, and generates 20 programmatic AI prompts and 6 Pillar SEO blogs via Claude.",
+    {
+      url: z.string().describe("Target website URL"),
+      niche: z.string().describe("Business niche format"),
+      city: z.string().describe("Target city format"),
+    },
+    async ({ url, niche, city }) => {
+      try {
+        const audit = await runKendrickAudit({ url, niche, city });
+        return { 
+          content: [{ 
+            type: "text" as const, 
+            text: JSON.stringify(audit) 
+          }] 
+        };
+      } catch (err: any) {
+        return { content: [{ type: "text" as const, text: `Kendrick Error: ${err.message}` }], isError: true };
+      }
     }
   );
 
@@ -524,7 +571,7 @@ function createServer(): McpServer {
 // ─────────────────────────────────────────────
 const ROSTER = [
   "simon_cowell", "yonce", "dre", "hov",
-  "tiny_harris", "cersei", "tyrion", "kris_jenner",
+  "tiny_harris", "cersei", "tyrion", "kris_jenner", "kendrick"
 ] as const;
 
 const app = express();
