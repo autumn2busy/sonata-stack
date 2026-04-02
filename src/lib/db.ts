@@ -81,3 +81,33 @@ export async function getLeadById(leadId: string) {
   if (error) throw new Error(`Supabase read failed: ${error.message}`);
   return data;
 }
+
+export async function insertLead(payload: {
+  businessName: string;
+  niche: string;
+  location?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  placeId?: string;
+  scoutData?: Record<string, unknown>;
+  status?: string;
+}) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("AgencyLead")
+    .upsert({
+      businessName: payload.businessName,
+      niche: payload.niche,
+      location: payload.location,
+      contactEmail: payload.contactEmail,
+      contactPhone: payload.contactPhone,
+      placeId: payload.placeId,
+      scoutData: payload.scoutData,
+      status: payload.status || "DISCOVERED",
+    }, { onConflict: "placeId" })
+    .select()
+    .single();
+
+  if (error) throw new Error(`Supabase insert failed: ${error.message}`);
+  return data;
+}

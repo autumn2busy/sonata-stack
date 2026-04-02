@@ -5,7 +5,7 @@ import express from "express";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { buildIntelPrompt } from "./lib/prompts.js";
-import { updateLeadAsAudited, updateLeadAsBuilt, getLeadById } from "./lib/db.js";
+import { updateLeadAsAudited, updateLeadAsBuilt, getLeadById, insertLead } from "./lib/db.js";
 import { getCanonicalDemoUrl, triggerDeploy } from "./lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "./lib/heygen.js";
 
@@ -28,8 +28,95 @@ function createServer(): McpServer {
       city: z.string().describe("City to search in (e.g. 'Atlanta, GA')"),
     },
     async ({ niche, city }) => {
-      // TODO: implement Google Places + Yelp discovery
-      return { content: [{ type: "text" as const, text: `Scout stub: searching ${niche} in ${city}` }] };
+      const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
+      if (!GOOGLE_PLACES_API_KEY) {
+        return {
+          content: [{ type: "text" as const, text: "Error: Missing GOOGLE_PLACES_API_KEY" }],
+          isError: true,
+        };
+      }
+
+      try {
+        const query = `${niche} in ${city}`;
+        const placesRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+            "X-Goog-FieldMask": "places.id,places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.formattedAddress,places.nationalPhoneNumber"
+          },
+          body: JSON.stringify({
+            textQuery: query,
+            languageCode: "en"
+          })
+        });
+
+        if (!placesRes.ok) {
+           return { content: [{ type: "text" as const, text: `Google Places API Error: ${placesRes.statusText}`}], isError: true };
+        }
+
+        const data = await placesRes.json() as any;
+        const places = data.places || [];
+
+        // Filter leads strictly by >3 reviews / >3.0 rating and NO website
+        const validLeads = places.filter((p: any) => 
+          !p.websiteUri && 
+          (p.rating && p.rating >= 3.0) && 
+          (p.userRatingCount && p.userRatingCount > 3)
+        );
+
+        const savedLeads = [];
+        const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
+
+        for (const place of validLeads) {
+          // Scaffold out Hunter.io domain enrichment. 
+          // Since validLeads filters out businesses with websites to find top funnel gaps,
+          // Hunter.io would primarily be triggered if we loosen the website filter later
+          // or run it against a deduced branded domain.
+          let enrichedEmail = "";
+          if (HUNTER_API_KEY && place.websiteUri) {
+             try {
+               const domain = new URL(place.websiteUri).hostname;
+               const hunterRes = await fetch(`https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${HUNTER_API_KEY}`);
+               const hunterData = await hunterRes.json() as any;
+               enrichedEmail = hunterData?.data?.emails?.[0]?.value || "";
+             } catch (e) {
+               console.warn("Hunter.io skipped or failed", e);
+             }
+          }
+
+          const inserted = await insertLead({
+            businessName: place.displayName?.text || "Unknown",
+            niche,
+            location: place.formattedAddress,
+            contactPhone: place.nationalPhoneNumber,
+            contactEmail: enrichedEmail || undefined,
+            placeId: place.id,
+            scoutData: {
+              rawPlace: place
+            },
+            status: "DISCOVERED"
+          });
+          savedLeads.push(inserted);
+        }
+
+        return {
+           content: [{
+             type: "text" as const,
+             text: JSON.stringify({
+                scoutedRaw: places.length,
+                qualifiedAndSaved: savedLeads.length,
+                leads: savedLeads.map(l => ({ id: l.id, businessName: l.businessName, placeId: l.placeId }))
+             })
+           }]
+        };
+
+      } catch (err: any) {
+        return {
+           content: [{ type: "text" as const, text: `Simon error: ${err.message}` }],
+           isError: true,
+        };
+      }
     }
   );
 
