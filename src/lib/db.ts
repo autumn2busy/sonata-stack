@@ -111,3 +111,31 @@ export async function insertLead(payload: {
   if (error) throw new Error(`Supabase insert failed: ${error.message}`);
   return data;
 }
+
+export async function getExpiredLeads() {
+  const supabase = getSupabase();
+  const now = new Date().toISOString();
+  
+  const { data, error } = await supabase
+    .from("AgencyLead")
+    .select("*")
+    .not("validUntil", "is", null)
+    .lt("validUntil", now)
+    .in("status", ["BUILT", "DISCOVERED", "AUDITED", "PITCHED"]);
+
+  if (error) throw new Error(`Supabase read failed: ${error.message}`);
+  return data;
+}
+
+export async function updateLeadStatus(leadId: string, status: string) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("AgencyLead")
+    .update({ status })
+    .eq("id", leadId)
+    .select()
+    .single();
+
+  if (error) throw new Error(`Supabase status update failed: ${error.message}`);
+  return data;
+}
