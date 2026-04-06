@@ -2,6 +2,7 @@
 // Lazy-initialized: the server starts even when SUPABASE_URL is not set.
 // DB writes simply fail gracefully (yonce gates on leadId being present).
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import crypto from "node:crypto";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -34,6 +35,7 @@ export async function updateLeadAsAudited(
       status: "AUDITED",
       intelScore,
       intelData,
+      updatedAt: new Date().toISOString(),
     })
     .eq("id", leadId)
     .select()
@@ -61,6 +63,7 @@ export async function updateLeadAsBuilt(
       walkthroughVideoUrl: updates.walkthroughVideoUrl || null,
       validUntil: updates.validUntil,
       intelData: updates.intelData,
+      updatedAt: new Date().toISOString(),
     })
     .eq("id", leadId)
     .select()
@@ -96,6 +99,7 @@ export async function insertLead(payload: {
   const { data, error } = await supabase
     .from("AgencyLead")
     .upsert({
+      id: crypto.randomUUID(),
       businessName: payload.businessName,
       niche: payload.niche,
       location: payload.location,
@@ -104,6 +108,7 @@ export async function insertLead(payload: {
       placeId: payload.placeId,
       scoutData: payload.scoutData,
       status: payload.status || "DISCOVERED",
+      updatedAt: new Date().toISOString(),
     }, { onConflict: "placeId" })
     .select()
     .single();
@@ -131,7 +136,10 @@ export async function updateLeadStatus(leadId: string, status: string) {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("AgencyLead")
-    .update({ status })
+    .update({ 
+      status,
+      updatedAt: new Date().toISOString(),
+    })
     .eq("id", leadId)
     .select()
     .single();
