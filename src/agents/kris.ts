@@ -39,7 +39,7 @@ export async function runKrisJennerClose({ contactId, dealId, websiteUrl }: { co
     console.log(`[Kris Jenner] Asset pipeline complete. Updating Deal ${dealId} with ${expectedDemoUrl}`);
 
     return {
-        status: "CLOSED_ASSETS_BUILT",
+        status: "DEMO_BUILT",
         dealId,
         contactId,
         websiteUrl,

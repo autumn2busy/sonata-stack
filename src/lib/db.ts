@@ -58,7 +58,7 @@ export async function updateLeadAsBuilt(
   const { data, error } = await supabase
     .from("AgencyLead")
     .update({
-      status: "BUILT",
+      status: "DEMO_BUILT",
       demoSiteUrl: updates.demoSiteUrl,
       walkthroughVideoUrl: updates.walkthroughVideoUrl || null,
       validUntil: updates.validUntil,

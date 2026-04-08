@@ -349,7 +349,7 @@ function createServer(): McpServer {
             {
               type: "text" as const,
               text: JSON.stringify({
-                status: "BUILT",
+                status: "DEMO_BUILT",
                 leadId,
                 businessName,
                 demoSiteUrl,
@@ -397,15 +397,15 @@ function createServer(): McpServer {
       const emailBody = completion.content[0]?.type === "text" ? completion.content[0].text : "";
 
       // 2. Update DB status directly to map against Pipeline Stage 12 'Negotiating'
-      await updateLeadStatus(leadId, "NEGOTIATING");
+      await updateLeadStatus(leadId, "REPLIED");
 
       return { 
         content: [{ 
           type: "text" as const, 
           text: JSON.stringify({
-            status: "NEGOTIATING",
+            status: "REPLIED",
             emailDraft: emailBody,
-            msg: `Closer: Drafted email for ${contactEmail} and bumped DB lead ${leadId} to NEGOTIATING.`
+            msg: `Closer: Drafted email for ${contactEmail} and bumped DB lead ${leadId} to REPLIED.`
           })
         }] 
       };
@@ -487,6 +487,9 @@ function createServer(): McpServer {
     },
     async ({ niche, city, minScore }) => {
       // The Orchestrator loop simulates invoking the pipeline 1-by-1
+      const loopMsg = "Loop successfully modeled. (Manual execution via UI recommended based on token limits)";
+      console.log(`[Tyrion] ${loopMsg}`);
+      
       return { 
         content: [{ 
            type: "text" as const, 
@@ -498,7 +501,7 @@ function createServer(): McpServer {
                 `3. EXECUTING dre(lead) for qualified intel records`,
                 `4. EXECUTING hov for outreach`
              ],
-             status: "Loop successfully modeled. (Manual execution via UI recommended based on token limits)"
+             message: loopMsg
            })
         }] 
       };
