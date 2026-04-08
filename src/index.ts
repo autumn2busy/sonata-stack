@@ -8,6 +8,7 @@ import { buildIntelPrompt } from "./lib/prompts.js";
 import { updateLeadAsAudited, updateLeadAsBuilt, getLeadById, insertLead, getExpiredLeads, updateLeadStatus } from "./lib/db.js";
 import { getCanonicalDemoUrl, triggerDeploy, passwordProtectDeployment } from "./lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "./lib/heygen.js";
+import { classifyWebPresence, isQualifiedLead } from "./lib/qualification.js";
 import { runKendrickAudit } from "./agents/kendrick.js";
 import { runTinyHarrisReport } from "./agents/tiny.js";
 import { runKrisJennerClose } from "./agents/kris.js";
@@ -61,42 +62,65 @@ function createServer(): McpServer {
         const data = await placesRes.json() as any;
         const places = data.places || [];
 
-        // Filter leads strictly by >3 reviews / >3.0 rating and NO website
-        const validLeads = places.filter((p: any) => 
-          !p.websiteUri && 
-          (p.rating && p.rating >= 3.0) && 
-          (p.userRatingCount && p.userRatingCount > 3)
+        const placesWithPresence = await Promise.all(
+          places.map(async (p: any) => ({
+            place: p,
+            presence: await classifyWebPresence(p)
+          }))
+        );
+
+        const validLeads = placesWithPresence.filter(({ place, presence }) => 
+          isQualifiedLead(place, presence)
+        );
+
+        console.log(`[Simon] Scouted ${places.length}, qualified ${validLeads.length}`);
+        console.log(`[Simon] Presence breakdown:`, 
+          placesWithPresence.reduce((acc: any, { presence }: any) => {
+            acc[presence.classification] = (acc[presence.classification] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>)
         );
 
         const savedLeads = [];
         const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
 
-        for (const place of validLeads) {
-          // Scaffold out Hunter.io domain enrichment. 
-          // Since validLeads filters out businesses with websites to find top funnel gaps,
-          // Hunter.io would primarily be triggered if we loosen the website filter later
-          // or run it against a deduced branded domain.
-          let enrichedEmail = "";
-          if (HUNTER_API_KEY && place.websiteUri) {
-             try {
-               const domain = new URL(place.websiteUri).hostname;
-               const hunterRes = await fetch(`https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${HUNTER_API_KEY}`);
-               const hunterData = await hunterRes.json() as any;
-               enrichedEmail = hunterData?.data?.emails?.[0]?.value || "";
-             } catch (e) {
-               console.warn("Hunter.io skipped or failed", e);
-             }
+        for (const { place, presence } of validLeads) {
+          let enrichedEmail: string | undefined = undefined;
+          
+          // Hunter.io only works if we have a real domain to query
+          // Use it for DEAD_SITE classification (real domain, just broken)
+          // Skip for NONE and WEAK_PLACEHOLDER (no real domain to enrich)
+          if (
+            HUNTER_API_KEY && 
+            presence.classification === "DEAD_SITE" && 
+            presence.checkedUrl
+          ) {
+            try {
+              const domain = new URL(presence.checkedUrl).hostname.replace(/^www\./, '');
+              const hunterRes = await fetch(
+                `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${HUNTER_API_KEY}&limit=1`
+              );
+              const hunterData = await hunterRes.json() as any;
+              if (hunterData?.data?.emails?.length > 0) {
+                enrichedEmail = hunterData.data.emails[0].value;
+                console.log(`[Simon] Hunter.io enriched: ${domain} → ${enrichedEmail}`);
+              }
+            } catch (err) {
+              console.log(`[Simon] Hunter.io failed for ${presence.checkedUrl}:`, err);
+            }
           }
-
+          
+          // Insert with enriched email if found
           const inserted = await insertLead({
-            businessName: place.displayName?.text || "Unknown",
+            businessName: place.displayName?.text || place.displayName || "Unknown",
             niche,
-            location: place.formattedAddress,
+            location: city,
+            contactEmail: enrichedEmail,
             contactPhone: place.nationalPhoneNumber,
-            contactEmail: enrichedEmail || undefined,
             placeId: place.id,
             scoutData: {
-              rawPlace: place
+              ...place,
+              webPresence: presence,
             },
             status: "DISCOVERED"
           });
