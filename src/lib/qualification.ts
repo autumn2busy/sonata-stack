@@ -42,6 +42,17 @@ export async function classifyWebPresence(place: any): Promise<{
   }
   
   // Real domain — check if it's alive
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch (err: any) {
+    return { 
+      classification: "WEAK_PLACEHOLDER" as const, 
+      detail: `Malformed URL: ${err.message}`,
+      checkedUrl: url 
+    };
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000); // 5 second max

@@ -62,12 +62,31 @@ function createServer(): McpServer {
         const data = await placesRes.json() as any;
         const places = data.places || [];
 
+        console.log(`[Simon] Starting classification for ${places.length} places`);
+
         const placesWithPresence = await Promise.all(
-          places.map(async (p: any) => ({
-            place: p,
-            presence: await classifyWebPresence(p)
-          }))
+          places.map(async (p: any) => {
+            try {
+              const presence = await classifyWebPresence(p);
+              console.log(`[Simon] ${p.displayName?.text || p.id}: ${presence.classification} (${presence.detail})`);
+              return { place: p, presence };
+            } catch (err: any) {
+              console.error(`[Simon] FAILED classifying ${p.displayName?.text || p.id}`);
+              console.error(`[Simon]   URL: ${p.websiteUri}`);
+              console.error(`[Simon]   Error: ${err.message}`);
+              console.error(`[Simon]   Stack: ${err.stack}`);
+              return { 
+                place: p, 
+                presence: { 
+                  classification: "NONE" as const, 
+                  detail: `Classification error: ${err.message}` 
+                } 
+              };
+            }
+          })
         );
+
+        console.log(`[Simon] Classification complete`);
 
         const validLeads = placesWithPresence.filter(({ place, presence }) => 
           isQualifiedLead(place, presence)
