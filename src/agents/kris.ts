@@ -3,7 +3,18 @@ import Anthropic from '@anthropic-ai/sdk';
 // import { runYonce } from './yonce.js';
 // import { runDre } from './dre.js';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _anthropic: Anthropic | null = null;
+
+function getAnthropic(): Anthropic {
+    if (!_anthropic) {
+        const key = process.env.ANTHROPIC_API_KEY;
+        if (!key) {
+            throw new Error("[Kris] ANTHROPIC_API_KEY required");
+        }
+        _anthropic = new Anthropic({ apiKey: key });
+    }
+    return _anthropic;
+}
 
 export async function runKrisJennerClose({ contactId, dealId, websiteUrl }: { contactId: string, dealId: string, websiteUrl: string }) {
     console.log(`[Kris Jenner] Kicking off Post-Call Closer flow for Deal: ${dealId}`);
@@ -27,7 +38,7 @@ export async function runKrisJennerClose({ contactId, dealId, websiteUrl }: { co
     Their custom stripe checkout link is: ${stripePaymentLink}
     Write the exact email to send to the prospect closing them on the deal today. Do not hallucinate placeholders. Keep it under 200 words.`;
 
-    const completion = await anthropic.messages.create({
+    const completion = await getAnthropic().messages.create({
         model: "claude-3-haiku-20240307",
         max_tokens: 600,
         system: systemPrompt,

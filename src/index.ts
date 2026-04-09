@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import Anthropic from "@anthropic-ai/sdk";
@@ -13,7 +14,18 @@ import { runKendrickAudit } from "./agents/kendrick.js";
 import { runTinyHarrisReport } from "./agents/tiny.js";
 import { runKrisJennerClose } from "./agents/kris.js";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _anthropic: Anthropic | null = null;
+
+function getAnthropic(): Anthropic {
+  if (!_anthropic) {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) {
+      throw new Error("[index] ANTHROPIC_API_KEY required");
+    }
+    _anthropic = new Anthropic({ apiKey: key });
+  }
+  return _anthropic;
+}
 
 function createServer(): McpServer {
   const server = new McpServer({
@@ -239,7 +251,7 @@ function createServer(): McpServer {
         reviewsText,
       });
 
-      const completion = await anthropic.messages.create({
+      const completion = await getAnthropic().messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 1024,
         system: systemPrompt,
@@ -430,7 +442,7 @@ function createServer(): McpServer {
     },
     async ({ leadId, contactEmail, context }) => {
       // 1. Draft the personalized email response
-      const completion = await anthropic.messages.create({
+      const completion = await getAnthropic().messages.create({
         model: "claude-3-haiku-20240307",
         max_tokens: 600,
         system: "You are Jordan, FlyNerd's senior sales executive. Write a short, persuasive 1:1 email response addressing the prospect's reply. End with a strong CTA to book a strategy call.",

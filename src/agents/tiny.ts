@@ -1,12 +1,35 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+let _supabase: SupabaseClient | null = null;
+let _anthropic: Anthropic | null = null;
+
+function getSupabase(): SupabaseClient {
+    if (!_supabase) {
+        const url = process.env.SUPABASE_URL;
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!url || !key) {
+            throw new Error("[Tiny] SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required");
+        }
+        _supabase = createClient(url, key);
+    }
+    return _supabase;
+}
+
+function getAnthropic(): Anthropic {
+    if (!_anthropic) {
+        const key = process.env.ANTHROPIC_API_KEY;
+        if (!key) {
+            throw new Error("[Tiny] ANTHROPIC_API_KEY required");
+        }
+        _anthropic = new Anthropic({ apiKey: key });
+    }
+    return _anthropic;
+}
 
 export async function runTinyHarrisReport() {
+    const supabase = getSupabase();
+    const anthropic = getAnthropic();
     console.log(`[Tiny Harris] Initializing monthly growth and nurture sweep.`);
     
     // In realistic production this fetches from the Client table:

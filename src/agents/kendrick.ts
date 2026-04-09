@@ -2,7 +2,18 @@ import puppeteer from 'puppeteer';
 import * as cheerio from 'cheerio';
 import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _anthropic: Anthropic | null = null;
+
+function getAnthropic(): Anthropic {
+    if (!_anthropic) {
+        const key = process.env.ANTHROPIC_API_KEY;
+        if (!key) {
+            throw new Error("[Kendrick] ANTHROPIC_API_KEY required");
+        }
+        _anthropic = new Anthropic({ apiKey: key });
+    }
+    return _anthropic;
+}
 
 export async function runKendrickAudit({ url, niche, city }: { url: string, niche: string, city: string }) {
     console.log(`[Kendrick] Launching AEO Audit on ${url}`);
@@ -56,7 +67,7 @@ export async function runKendrickAudit({ url, niche, city }: { url: string, nich
     3. 6 Pillar Blog Topics tailored for geographical dominance.
     Return JSON format: { "eeatCritique": "", "aiPrompts": [20 items], "pillarTopics": [6 items] }`;
 
-    const completion = await anthropic.messages.create({
+    const completion = await getAnthropic().messages.create({
         model: "claude-3-haiku-20240307",
         max_tokens: 1500,
         system: systemPrompt,
