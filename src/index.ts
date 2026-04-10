@@ -223,7 +223,7 @@ function createServer(): McpServer {
     {
       niche: z.string().describe("Business niche to target"),
       city: z.string().describe("City to target"),
-      minScore: z.number().default(50).describe("Minimum Yoncé score to qualify (default: 50)"),
+      minScore: z.number().optional().default(50).describe("Minimum Yoncé score to qualify (default: 50)"),
     },
     async ({ niche, city, minScore }) => {
       try {
