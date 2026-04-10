@@ -227,7 +227,7 @@ function createServer(): McpServer {
     },
     async ({ niche, city, minScore }) => {
       try {
-        console.log(`[Tyrion] Starting orchestrator loop for ${niche} in ${city}...`);
+        console.error(`[Tyrion] Starting orchestrator loop for ${niche} in ${city}...`);
         
         // 1. Scout Leads
         const { leads, scoutedRaw, qualifiedAndSaved } = await execSimonCowell(niche, city);
@@ -265,7 +265,7 @@ function createServer(): McpServer {
         );
         
         const summary = { city, niche, totalScouted: scoutedRaw, qualified: qualifiedAndSaved, built, outreached, needsManualOutreach, errors };
-        console.log(`[Tyrion] Pipeline run complete:`, summary);
+        console.error(`[Tyrion] Pipeline run complete:`, summary);
         
         return { 
           content: [{ 
@@ -427,5 +427,5 @@ app.delete("/mcp", async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`Sonata Stack MCP server listening on port ${PORT}`);
+  console.error(`Sonata Stack MCP server listening on port ${PORT}`);
 });

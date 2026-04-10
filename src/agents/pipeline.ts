@@ -35,13 +35,13 @@ export async function execSimonCowell(niche: string, city: string) {
 
   const data = await placesRes.json() as any;
   const places = data.places || [];
-  console.log(`[Simon] Starting classification for ${places.length} places`);
+  console.error(`[Simon] Starting classification for ${places.length} places`);
 
   const placesWithPresence = await Promise.all(
     places.map(async (p: any) => {
       try {
         const presence = await classifyWebPresence(p);
-        console.log(`[Simon] ${p.displayName?.text || p.id}: ${presence.classification} (${presence.detail})`);
+        console.error(`[Simon] ${p.displayName?.text || p.id}: ${presence.classification} (${presence.detail})`);
         return { place: p, presence };
       } catch (err: any) {
         return { place: p, presence: { classification: "NONE" as const, detail: `Classification error: ${err.message}` } };
@@ -50,7 +50,7 @@ export async function execSimonCowell(niche: string, city: string) {
   );
 
   const validLeads = placesWithPresence.filter(({ place, presence }) => isQualifiedLead(place, presence));
-  console.log(`[Simon] Scouted ${places.length}, qualified ${validLeads.length}`);
+  console.error(`[Simon] Scouted ${places.length}, qualified ${validLeads.length}`);
 
   const savedLeads = [];
   const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
@@ -64,10 +64,10 @@ export async function execSimonCowell(niche: string, city: string) {
         const hunterData = await hunterRes.json() as any;
         if (hunterData?.data?.emails?.length > 0) {
           enrichedEmail = hunterData.data.emails[0].value;
-          console.log(`[Simon] Hunter.io enriched: ${domain} -> ${enrichedEmail}`);
+          console.error(`[Simon] Hunter.io enriched: ${domain} -> ${enrichedEmail}`);
         }
       } catch (err) {
-        console.log(`[Simon] Hunter.io failed:`, err);
+        console.error(`[Simon] Hunter.io failed:`, err);
       }
     }
     
@@ -209,7 +209,7 @@ export async function execDre(leadId: string, businessName: string, niche: strin
           if (url && key) {
             const sb = createClient(url, key);
             await sb.from("AgencyLead").update({ walkthroughVideoUrl: videoUrl, updatedAt: new Date().toISOString() }).eq("id", leadId);
-            console.log(`[Dre] Video URL saved for ${businessName}: ${videoUrl}`);
+            console.error(`[Dre] Video URL saved for ${businessName}: ${videoUrl}`);
           }
         } catch (err) {
           console.error("[Dre] Failed to save video URL:", err);
