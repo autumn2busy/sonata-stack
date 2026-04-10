@@ -126,7 +126,7 @@ export async function getExpiredLeads() {
     .select("*")
     .not("validUntil", "is", null)
     .lt("validUntil", now)
-    .in("status", ["BUILT", "DISCOVERED", "AUDITED", "PITCHED"]);
+    .in("status", ["DEMO_BUILT", "DISCOVERED", "AUDITED", "OUTREACH_SENT"]);
 
   if (error) throw new Error(`Supabase read failed: ${error.message}`);
   return data;

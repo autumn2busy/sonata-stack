@@ -99,7 +99,7 @@ async function runQATest() {
     validUntil,
     intelData: intelDataForTemplate,
   });
-  console.log(`✅ Supabase Lead Updated to BUILT`);
+  console.log(`✅ Supabase Lead Updated to DEMO_BUILT`);
   console.log(`   Live Demo Link Queued: ${demoSiteUrl}`);
 
   // ==========================================
@@ -112,8 +112,8 @@ async function runQATest() {
 
   const emailBody = `Hey there,\n\nI was looking at Elite Plumb Bros Atlanta and noticed you have an incredible 4.8 star rating but no official website for your customers. I actually went ahead and built a live demo of a digital storefront tailored perfectly for your business: ${demoSiteUrl}\n\nLet me know if you are open to a quick chat to take that site live and capture the local search volume you're currently missing out on.\n\nBest,\nJordan`;
 
-  await updateLeadStatus(dbLead.id, "NEGOTIATING");
-  console.log(`✅ Supabase Lead Updated to NEGOTIATING`);
+  await updateLeadStatus(dbLead.id, "REPLIED");
+  console.log(`✅ Supabase Lead Updated to REPLIED`);
   console.log(`\n✉️  EMAIL DRAFT GENERATED:\n--------------------------\n${emailBody}\n--------------------------`);
 
   console.log(`\n🎉 QA PIPELINE 100% SUCCESSFUL! RUN COMPLETE.`);

@@ -13,6 +13,7 @@ import { classifyWebPresence, isQualifiedLead } from "./lib/qualification.js";
 import { runKendrickAudit } from "./agents/kendrick.js";
 import { runTinyHarrisReport } from "./agents/tiny.js";
 import { runKrisJennerClose } from "./agents/kris.js";
+import { execSimonCowell, execYonce, execDre, execHovOutreach } from "./agents/pipeline.js";
 
 let _anthropic: Anthropic | null = null;
 
@@ -44,131 +45,11 @@ function createServer(): McpServer {
       city: z.string().describe("City to search in (e.g. 'Atlanta, GA')"),
     },
     async ({ niche, city }) => {
-      const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
-      if (!GOOGLE_PLACES_API_KEY) {
-        return {
-          content: [{ type: "text" as const, text: "Error: Missing GOOGLE_PLACES_API_KEY" }],
-          isError: true,
-        };
-      }
-
       try {
-        const query = `${niche} in ${city}`;
-        const placesRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-            "X-Goog-FieldMask": "places.id,places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.formattedAddress,places.nationalPhoneNumber"
-          },
-          body: JSON.stringify({
-            textQuery: query,
-            languageCode: "en"
-          })
-        });
-
-        if (!placesRes.ok) {
-           return { content: [{ type: "text" as const, text: `Google Places API Error: ${placesRes.statusText}`}], isError: true };
-        }
-
-        const data = await placesRes.json() as any;
-        const places = data.places || [];
-
-        console.log(`[Simon] Starting classification for ${places.length} places`);
-
-        const placesWithPresence = await Promise.all(
-          places.map(async (p: any) => {
-            try {
-              const presence = await classifyWebPresence(p);
-              console.log(`[Simon] ${p.displayName?.text || p.id}: ${presence.classification} (${presence.detail})`);
-              return { place: p, presence };
-            } catch (err: any) {
-              console.error(`[Simon] FAILED classifying ${p.displayName?.text || p.id}`);
-              console.error(`[Simon]   URL: ${p.websiteUri}`);
-              console.error(`[Simon]   Error: ${err.message}`);
-              console.error(`[Simon]   Stack: ${err.stack}`);
-              return { 
-                place: p, 
-                presence: { 
-                  classification: "NONE" as const, 
-                  detail: `Classification error: ${err.message}` 
-                } 
-              };
-            }
-          })
-        );
-
-        console.log(`[Simon] Classification complete`);
-
-        const validLeads = placesWithPresence.filter(({ place, presence }) => 
-          isQualifiedLead(place, presence)
-        );
-
-        console.log(`[Simon] Scouted ${places.length}, qualified ${validLeads.length}`);
-        console.log(`[Simon] Presence breakdown:`, 
-          placesWithPresence.reduce((acc: any, { presence }: any) => {
-            acc[presence.classification] = (acc[presence.classification] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>)
-        );
-
-        const savedLeads = [];
-        const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
-
-        for (const { place, presence } of validLeads) {
-          let enrichedEmail: string | undefined = undefined;
-          
-          // Hunter.io only works if we have a real domain to query
-          // Use it for DEAD_SITE classification (real domain, just broken)
-          // Skip for NONE and WEAK_PLACEHOLDER (no real domain to enrich)
-          if (
-            HUNTER_API_KEY && 
-            presence.classification === "DEAD_SITE" && 
-            presence.checkedUrl
-          ) {
-            try {
-              const domain = new URL(presence.checkedUrl).hostname.replace(/^www\./, '');
-              const hunterRes = await fetch(
-                `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${HUNTER_API_KEY}&limit=1`
-              );
-              const hunterData = await hunterRes.json() as any;
-              if (hunterData?.data?.emails?.length > 0) {
-                enrichedEmail = hunterData.data.emails[0].value;
-                console.log(`[Simon] Hunter.io enriched: ${domain} → ${enrichedEmail}`);
-              }
-            } catch (err) {
-              console.log(`[Simon] Hunter.io failed for ${presence.checkedUrl}:`, err);
-            }
-          }
-          
-          // Insert with enriched email if found
-          const inserted = await insertLead({
-            businessName: place.displayName?.text || place.displayName || "Unknown",
-            niche,
-            location: city,
-            contactEmail: enrichedEmail,
-            contactPhone: place.nationalPhoneNumber,
-            placeId: place.id,
-            scoutData: {
-              ...place,
-              webPresence: presence,
-            },
-            status: "DISCOVERED"
-          });
-          savedLeads.push(inserted);
-        }
-
+        const result = await execSimonCowell(niche, city);
         return {
-           content: [{
-             type: "text" as const,
-             text: JSON.stringify({
-                scoutedRaw: places.length,
-                qualifiedAndSaved: savedLeads.length,
-                leads: savedLeads.map(l => ({ id: l.id, businessName: l.businessName, placeId: l.placeId }))
-             })
-           }]
+           content: [{ type: "text" as const, text: JSON.stringify(result) }]
         };
-
       } catch (err: any) {
         return {
            content: [{ type: "text" as const, text: `Simon error: ${err.message}` }],
@@ -190,113 +71,17 @@ function createServer(): McpServer {
       leadId: z.string().optional().describe("Internal lead ID for DB persistence. If omitted, analysis is returned without saving."),
     },
     async ({ businessName, placeId, leadId }) => {
-      const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
-      const YELP_API_KEY = process.env.YELP_API_KEY;
-
-      if (!GOOGLE_PLACES_API_KEY && !YELP_API_KEY) {
+      try {
+        const result = await execYonce(businessName, placeId, leadId);
         return {
-          content: [{ type: "text" as const, text: "Error: Missing both GOOGLE_PLACES_API_KEY and YELP_API_KEY" }],
-          isError: true,
+           content: [{ type: "text" as const, text: JSON.stringify(result) }]
+        };
+      } catch (err: any) {
+        return {
+           content: [{ type: "text" as const, text: `Yoncé error: ${err.message}` }],
+           isError: true,
         };
       }
-
-      // ── 1. Fetch reviews ──────────────────────────
-      let reviews: Array<{ rating: number; text: { text: string } }> = [];
-      let rating = 0;
-      let userRatingCount = 0;
-
-      if (GOOGLE_PLACES_API_KEY) {
-        const placesRes = await fetch(
-          `https://places.googleapis.com/v1/places/${placeId}?languageCode=en`,
-          {
-            method: "GET",
-            headers: {
-              "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-              "X-Goog-FieldMask": "reviews,rating,userRatingCount",
-            },
-          }
-        );
-        if (placesRes.ok) {
-          const data = await placesRes.json() as any;
-          reviews = data.reviews || [];
-          rating = data.rating || 0;
-          userRatingCount = data.userRatingCount || 0;
-        }
-      } else if (YELP_API_KEY) {
-        const yelpRes = await fetch(
-          `https://api.yelp.com/v3/businesses/${placeId}/reviews`,
-          { headers: { Authorization: `Bearer ${YELP_API_KEY}` } }
-        );
-        if (yelpRes.ok) {
-          const data = await yelpRes.json() as any;
-          reviews = data.reviews || [];
-          rating = 4.0;
-        }
-      }
-
-      // ── 2. Prepare reviews text ───────────────────
-      const reviewsText =
-        reviews.length > 0
-          ? reviews
-            .map((r: any) => `Review (${r.rating} stars): ${r.text?.text || "No text"}`)
-            .join("\n")
-          : "No reviews available.";
-
-      // ── 3. AI analysis ────────────────────────────
-      const systemPrompt = buildIntelPrompt({
-        businessName,
-        rating,
-        reviewCount: userRatingCount || reviews.length,
-        contextHint: "No official website detected.",
-        reviewsText,
-      });
-
-      const completion = await getAnthropic().messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: "user", content: "Analyze this business and return the JSON." }],
-      });
-
-      const aiRaw =
-        completion.content[0]?.type === "text"
-          ? completion.content[0].text.trim()
-          : "{}";
-      // Claude sometimes wraps JSON in ```json ... ``` fences — strip them
-      const cleanJson = aiRaw.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?\s*```$/i, "");
-      const analysis = JSON.parse(cleanJson);
-
-      // ── 4. Persist to DB (only when leadId is provided) ──
-      if (leadId) {
-        try {
-          await updateLeadAsAudited(leadId, analysis.opportunityScore || 50, {
-            rating,
-            reviewCount: userRatingCount || reviews.length,
-            painPoints: analysis.painPoints || [],
-            reputationSummary: analysis.reputationSummary || "",
-          });
-        } catch (dbErr: any) {
-          console.error("DB update failed (non-fatal):", dbErr.message);
-        }
-      }
-
-      // ── 5. Return full intel payload ──────────────
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              opportunityScore: analysis.opportunityScore ?? 0,
-              painPoints: analysis.painPoints ?? [],
-              reputationSummary: analysis.reputationSummary ?? "",
-              operatingContext: analysis.operatingContext ?? "",
-              socialProofPoints: analysis.socialProofPoints ?? [],
-              brandPalettes: analysis.brandPalettes ?? [],
-              selectedPalette: analysis.selectedPalette ?? null,
-            }),
-          },
-        ],
-      };
     }
   );
 
@@ -315,115 +100,15 @@ function createServer(): McpServer {
     },
     async ({ leadId, businessName, niche, rating, intelPayload }) => {
       try {
-        const ratingNumber =
-          typeof rating === "number"
-            ? rating
-            : Number.parseFloat(String(rating ?? "0")) || 0;
-        const payload = (intelPayload && typeof intelPayload === "object") ? intelPayload as any : {};
-        const painPoints = Array.isArray(payload.painPoints) ? payload.painPoints : [];
-        const socialProofPoints = Array.isArray(payload.socialProofPoints) ? payload.socialProofPoints : [];
-        const brandPalettes = Array.isArray(payload.brandPalettes) ? payload.brandPalettes : [];
-        const selectedPalette = payload.selectedPalette ?? brandPalettes[0] ?? null;
-
-        // ── 1. Map yonce output to the template's expected format ──
-        // The demo template reads intelData.brandColors.{primary,accent}
-        // but yonce outputs selectedPalette.{primary,accent}
-        const intelDataForTemplate = {
-          painPoints,
-          socialProofPoints,
-          operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
-          reputationSummary: typeof payload.reputationSummary === "string" ? payload.reputationSummary : "",
-          opportunityScore: typeof payload.opportunityScore === "number" ? payload.opportunityScore : 0,
-          brandPalettes,
-          // ← THIS is the key mapping the template reads
-          brandColors: {
-            primary: selectedPalette?.primary ?? "1B365D",
-            accent: selectedPalette?.accent ?? "D4AF37",
-          },
-          rating: ratingNumber,
-        };
-
-        // ── 2. Build the canonical demo URL ──
-        const demoSiteUrl = getCanonicalDemoUrl(leadId);
-
-        // ── 3. Set 7-day expiry ──
-        const validUntil = new Date(
-          Date.now() + 7 * 24 * 60 * 60 * 1000
-        ).toISOString();
-
-        // ── 4. Write to Supabase (updates status to BUILT) ──
-        await updateLeadAsBuilt(leadId, {
-          demoSiteUrl,
-          validUntil,
-          intelData: intelDataForTemplate,
-        });
-
-        // ── 5. Trigger Vercel redeploy so the template picks up new data ──
-        const deployed = await triggerDeploy();
-
-        // ── 6. Generate HeyGen video (async — don't block on it) ──
-        // Fire and forget: the video takes ~5-10 min to generate.
-        // We start it now and update the DB when it completes.
-        const videoScript = buildVideoScript({
-          businessName,
-          niche,
-          rating: ratingNumber,
-          painPoints,
-          operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
-        });
-
-        // Don't await — let it run in the background
-        generateAvatarVideo(videoScript, businessName)
-          .then(async (videoUrl) => {
-            if (videoUrl) {
-              try {
-                const { createClient } = await import("@supabase/supabase-js");
-                const url = process.env.SUPABASE_URL;
-                const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-                if (url && key) {
-                  const sb = createClient(url, key);
-                  await sb
-                    .from("AgencyLead")
-                    .update({ 
-                      walkthroughVideoUrl: videoUrl,
-                      updatedAt: new Date().toISOString(),
-                    })
-                    .eq("id", leadId);
-                  console.log(`[Dre] Video URL saved for ${businessName}: ${videoUrl}`);
-                }
-              } catch (err) {
-                console.error("[Dre] Failed to save video URL:", err);
-              }
-            }
-          })
-          .catch((err) => console.error("[Dre] HeyGen error (non-fatal):", err));
-
-        // ── 7. Return result ──
+        const result = await execDre(leadId, businessName, niche, rating || 0, intelPayload);
         return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                status: "DEMO_BUILT",
-                leadId,
-                businessName,
-                demoSiteUrl,
-                validUntil,
-                deployTriggered: deployed,
-                videoStatus: "generating",
-                videoScript: videoScript.substring(0, 100) + "...",
-                brandColors: intelDataForTemplate.brandColors,
-              }),
-            },
-          ],
+           content: [{ type: "text" as const, text: JSON.stringify(result) }]
         };
       } catch (err: any) {
         console.error("[Dre] Unhandled error:", err);
         return {
-          content: [
-            { type: "text" as const, text: `Dre error: ${err.message}` },
-          ],
-          isError: true,
+           content: [{ type: "text" as const, text: `Dre error: ${err.message}` }],
+           isError: true,
         };
       }
     }
@@ -443,7 +128,7 @@ function createServer(): McpServer {
     async ({ leadId, contactEmail, context }) => {
       // 1. Draft the personalized email response
       const completion = await getAnthropic().messages.create({
-        model: "claude-3-haiku-20240307",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 600,
         system: "You are Jordan, FlyNerd's senior sales executive. Write a short, persuasive 1:1 email response addressing the prospect's reply. End with a strong CTA to book a strategy call.",
         messages: [{ role: "user", content: `Context from prospect reply: ${context}` }],
@@ -541,25 +226,59 @@ function createServer(): McpServer {
       minScore: z.number().default(50).describe("Minimum Yoncé score to qualify (default: 50)"),
     },
     async ({ niche, city, minScore }) => {
-      // The Orchestrator loop simulates invoking the pipeline 1-by-1
-      const loopMsg = "Loop successfully modeled. (Manual execution via UI recommended based on token limits)";
-      console.log(`[Tyrion] ${loopMsg}`);
-      
-      return { 
-        content: [{ 
-           type: "text" as const, 
-           text: JSON.stringify({
-             orchestrator: "TYRION",
-             plan: [
-                `1. EXECUTING simon_cowell(niche=${niche}, city=${city})`,
-                `2. EXECUTING yonce(lead) for leads hitting score > ${minScore}`,
-                `3. EXECUTING dre(lead) for qualified intel records`,
-                `4. EXECUTING hov for outreach`
-             ],
-             message: loopMsg
-           })
-        }] 
-      };
+      try {
+        console.log(`[Tyrion] Starting orchestrator loop for ${niche} in ${city}...`);
+        
+        // 1. Scout Leads
+        const { leads, scoutedRaw, qualifiedAndSaved } = await execSimonCowell(niche, city);
+        
+        let built = 0;
+        let outreached = 0;
+        let needsManualOutreach = 0;
+        let errors: string[] = [];
+
+        // 2. Process all leads in parallel (allSettled ensures completion instead of fail-fast)
+        await Promise.allSettled(
+          leads.map(async (lead: any) => {
+            try {
+              // 2a. Intel
+              const yonceOut = await execYonce(lead.businessName, lead.placeId, lead.id);
+              
+              if (yonceOut.opportunityScore >= minScore) {
+                // 2b. Build Asset
+                const dreOut = await execDre(lead.id, lead.businessName, niche, yonceOut.rating, yonceOut);
+                built++;
+                
+                if (lead.contactEmail) {
+                  // 2c. Send Outreach
+                  await execHovOutreach(lead.id, lead.businessName, lead.contactEmail, niche, dreOut.demoSiteUrl);
+                  outreached++;
+                } else {
+                  needsManualOutreach++;
+                }
+              }
+            } catch (err: any) {
+              console.error(`[Tyrion] lead failed: ${lead.businessName} — ${err.message}`);
+              errors.push(`${lead.businessName}: ${err.message}`);
+            }
+          })
+        );
+        
+        const summary = { city, niche, totalScouted: scoutedRaw, qualified: qualifiedAndSaved, built, outreached, needsManualOutreach, errors };
+        console.log(`[Tyrion] Pipeline run complete:`, summary);
+        
+        return { 
+          content: [{ 
+             type: "text" as const, 
+             text: JSON.stringify(summary)
+          }] 
+        };
+      } catch (err: any) {
+        return {
+           content: [{ type: "text" as const, text: `Tyrion fatal error: ${err.message}` }],
+           isError: true,
+        };
+      }
     }
   );
 
