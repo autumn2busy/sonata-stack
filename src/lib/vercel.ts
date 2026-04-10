@@ -22,7 +22,7 @@ export async function triggerDeploy(): Promise<boolean> {
         try {
             const res = await fetch(hookUrl, { method: "POST" });
             if (res.ok) {
-                console.log("[Vercel] Deploy hook accepted.");
+                console.error("[Vercel] Deploy hook accepted.");
                 return true;
             }
             console.warn(`[Vercel] Deploy hook failed (${res.status})`);
@@ -61,7 +61,7 @@ export async function triggerDeploy(): Promise<boolean> {
             return false;
         }
 
-        console.log("[Vercel] API deploy triggered successfully.");
+        console.error("[Vercel] API deploy triggered successfully.");
         return true;
     } catch (err) {
         console.warn("[Vercel] API deploy network error:", err);
@@ -98,7 +98,7 @@ export async function passwordProtectDeployment(
             return { ok: false, error: err };
         }
 
-        console.log("[Vercel] Password protection enabled.");
+        console.error("[Vercel] Password protection enabled.");
         return { ok: true };
     } catch (err: any) {
         return { ok: false, error: err.message };

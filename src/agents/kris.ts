@@ -17,10 +17,10 @@ function getAnthropic(): Anthropic {
 }
 
 export async function runKrisJennerClose({ contactId, dealId, websiteUrl }: { contactId: string, dealId: string, websiteUrl: string }) {
-    console.log(`[Kris Jenner] Kicking off Post-Call Closer flow for Deal: ${dealId}`);
+    console.error(`[Kris Jenner] Kicking off Post-Call Closer flow for Deal: ${dealId}`);
     
     // 1. Mock launching Yoncé (Intel)
-    console.log(`[Kris Jenner] Launching Yoncé against ${websiteUrl}...`);
+    console.error(`[Kris Jenner] Launching Yoncé against ${websiteUrl}...`);
     const mockIntel = {
         opportunityScore: 85,
         painPoints: ["Outdated design logic", "Missing schema headers"],
@@ -28,7 +28,7 @@ export async function runKrisJennerClose({ contactId, dealId, websiteUrl }: { co
     };
     
     // 2. Mock launching Dre (Builder)
-    console.log(`[Kris Jenner] Launching Dre Demo generation with Intel Payload...`);
+    console.error(`[Kris Jenner] Launching Dre Demo generation with Intel Payload...`);
     const expectedDemoUrl = `https://demo-build-${dealId}.flynerd.agency`;
     const stripePaymentLink = `https://buy.stripe.com/test_closer_${contactId}`;
     
@@ -47,7 +47,7 @@ export async function runKrisJennerClose({ contactId, dealId, websiteUrl }: { co
 
     const emailDraft = completion.content[0]?.type === "text" ? completion.content[0].text.trim() : "";
     
-    console.log(`[Kris Jenner] Asset pipeline complete. Updating Deal ${dealId} with ${expectedDemoUrl}`);
+    console.error(`[Kris Jenner] Asset pipeline complete. Updating Deal ${dealId} with ${expectedDemoUrl}`);
 
     return {
         status: "DEMO_BUILT",

@@ -30,7 +30,7 @@ function getAnthropic(): Anthropic {
 export async function runTinyHarrisReport() {
     const supabase = getSupabase();
     const anthropic = getAnthropic();
-    console.log(`[Tiny Harris] Initializing monthly growth and nurture sweep.`);
+    console.error(`[Tiny Harris] Initializing monthly growth and nurture sweep.`);
     
     // In realistic production this fetches from the Client table:
     // const { data: clients } = await supabase.from('Client').select('*').eq('status', 'ACTIVE');
@@ -42,7 +42,7 @@ export async function runTinyHarrisReport() {
     const reports = [];
 
     for (const client of mockClients) {
-        console.log(`[Tiny Harris] Generating report for ${client.businessName}...`);
+        console.error(`[Tiny Harris] Generating report for ${client.businessName}...`);
         
         const systemPrompt = `You are Tiny Harris, a diligent growth manager. 
         Write a concise, encouraging Monthly Operations & SEO Markdown Report for the client "${client.businessName}" (${client.niche}).
@@ -58,7 +58,7 @@ export async function runTinyHarrisReport() {
         const markdownDraft = completion.content[0]?.type === "text" ? completion.content[0].text.trim() : "";
         
         // Mock AC update
-        console.log(`[Tiny Harris] Updating ActiveCampaign for contact ${client.acContactId} with latest report trigger.`);
+        console.error(`[Tiny Harris] Updating ActiveCampaign for contact ${client.acContactId} with latest report trigger.`);
 
         reports.push({
             clientId: client.id,
