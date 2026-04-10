@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "check:runtime-logs": "sh -c 'if rg -n \"console\\\\.log\" src/index.ts src/lib src/agents; then echo \"❌ runtime console.log detected in MCP server directories\"; exit 1; else echo \"✅ no runtime console.log in MCP server directories\"; fi'"
   },
   "keywords": [
     "mcp",

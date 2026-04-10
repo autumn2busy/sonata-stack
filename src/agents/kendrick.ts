@@ -16,7 +16,7 @@ function getAnthropic(): Anthropic {
 }
 
 export async function runKendrickAudit({ url, niche, city }: { url: string, niche: string, city: string }) {
-    console.log(`[Kendrick] Launching AEO Audit on ${url}`);
+    console.error(`[Kendrick] Launching AEO Audit on ${url}`);
     
     let browser;
     let html = '';
@@ -55,7 +55,7 @@ export async function runKendrickAudit({ url, niche, city }: { url: string, nich
       LocalBusiness JSON-LD: ${hasJSONLD ? 'Yes' : 'No'}
     `;
 
-    console.log(`[Kendrick] Scraped Data: ${auditSummary.replace(/\n /g, ' ')}`);
+    console.error(`[Kendrick] Scraped Data: ${auditSummary.replace(/\n /g, ' ')}`);
 
     // Claude Anthropic Tier 3 Generator
     const systemPrompt = `You are Kendrick, a Tier-3 Search Generative Experience (SGE) & AEO architect.

@@ -15,7 +15,7 @@ export async function generateAvatarVideo(
     const avatarId = process.env.HEYGEN_AVATAR_ID || "Abigail_expressive_2024112501";
     const voiceId = process.env.HEYGEN_VOICE_ID || "f38a635bee7a4d1f9b0a654a31d050d2";
 
-    console.log(`[HeyGen] Submitting video for ${businessName}...`);
+    console.error(`[HeyGen] Submitting video for ${businessName}...`);
 
     const submitRes = await fetch("https://api.heygen.com/v2/video/generate", {
         method: "POST",
@@ -56,7 +56,7 @@ export async function generateAvatarVideo(
         return "";
     }
 
-    console.log(`[HeyGen] Video queued: ${videoId}. Polling...`);
+    console.error(`[HeyGen] Video queued: ${videoId}. Polling...`);
 
     // Poll for completion (max 10 minutes)
     let status = "processing";
@@ -96,14 +96,14 @@ export async function generateAvatarVideo(
                 statusData?.data?.share_url ||
                 videoUrl;
 
-            console.log(`[HeyGen] Poll ${attempts}/${maxAttempts}: ${status}`);
+            console.error(`[HeyGen] Poll ${attempts}/${maxAttempts}: ${status}`);
         } catch (err) {
             console.warn("[HeyGen] Poll error:", err);
         }
     }
 
     if (status === "completed" && videoUrl) {
-        console.log("[HeyGen] Video completed!");
+        console.error("[HeyGen] Video completed!");
         return videoUrl;
     }
 
