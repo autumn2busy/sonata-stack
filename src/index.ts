@@ -216,15 +216,15 @@ function createServer(): McpServer {
       // 2. Update DB status directly to map against Pipeline Stage 12 'Negotiating'
       await updateLeadStatus(leadId, "REPLIED");
 
-      return { 
-        content: [{ 
-          type: "text" as const, 
+      return {
+        content: [{
+          type: "text" as const,
           text: JSON.stringify({
             status: "REPLIED",
             emailDraft: emailBody,
             msg: `Closer: Drafted email for ${contactEmail} and bumped DB lead ${leadId} to REPLIED.`
           })
-        }] 
+        }]
       };
     }
   );
@@ -241,11 +241,11 @@ function createServer(): McpServer {
     async ({ clientId }) => {
       try {
         const reportResult = await runTinyHarrisReport();
-        return { 
-          content: [{ 
-            type: "text" as const, 
-            text: JSON.stringify(reportResult) 
-          }] 
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(reportResult)
+          }]
         };
       } catch (err: any) {
         return { content: [{ type: "text" as const, text: `Tiny Harris Error: ${err.message}` }], isError: true };
@@ -274,16 +274,16 @@ function createServer(): McpServer {
           await updateLeadStatus(lead.id, "EXPIRED");
         }
 
-        return { 
-          content: [{ 
-            type: "text" as const, 
+        return {
+          content: [{
+            type: "text" as const,
             text: JSON.stringify({
               action: "LOCKED",
               count: expired.length,
               vercelLockSuccess: lockRes.ok,
               message: "She always pays her debts. Demos expired."
             })
-          }] 
+          }]
         };
       } catch (err: any) {
         return { content: [{ type: "text" as const, text: `Cersei Error: ${err.message}` }], isError: true };
@@ -320,11 +320,11 @@ function createServer(): McpServer {
           void runTyrionJob(jobId, niche, city, minScore);
         });
 
-        return { 
-          content: [{ 
-             type: "text" as const, 
+        return {
+          content: [{
+             type: "text" as const,
              text: JSON.stringify({ jobId, status: "running" })
-          }] 
+          }]
         };
       } catch (err: any) {
         return {
@@ -349,11 +349,11 @@ function createServer(): McpServer {
     async ({ contactId, dealId, websiteUrl }) => {
       try {
         const closeAsset = await runKrisJennerClose({ contactId, dealId, websiteUrl });
-        return { 
-          content: [{ 
-            type: "text" as const, 
-            text: JSON.stringify(closeAsset) 
-          }] 
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(closeAsset)
+          }]
         };
       } catch (err: any) {
         return { content: [{ type: "text" as const, text: `Kris Error: ${err.message}` }], isError: true };
@@ -375,11 +375,11 @@ function createServer(): McpServer {
     async ({ url, niche, city }) => {
       try {
         const audit = await runKendrickAudit({ url, niche, city });
-        return { 
-          content: [{ 
-            type: "text" as const, 
-            text: JSON.stringify(audit) 
-          }] 
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(audit)
+          }]
         };
       } catch (err: any) {
         return { content: [{ type: "text" as const, text: `Kendrick Error: ${err.message}` }], isError: true };
@@ -391,17 +391,9 @@ function createServer(): McpServer {
 }
 
 // ─────────────────────────────────────────────
-// Webhook: POST /webhook/post-call
-// Triggers kris_jenner when AC fires call_completed
+// Start — HTTP transport only (/mcp)
 // ─────────────────────────────────────────────
-// Note: MCP servers use stdio transport. For webhook ingress,
-// deploy a lightweight HTTP listener (e.g. Express or Hono)
-// that validates WEBHOOK_SECRET and invokes kris_jenner
-// internally. See src/webhook.ts (to be created).
-
-// ─────────────────────────────────────────────
-// Start — Express + Streamable HTTP
-// ─────────────────────────────────────────────
+const TRANSPORT_MODE = "http" as const;
 const ROSTER = [
   "simon_cowell", "yonce", "dre", "hov",
   "tiny_harris", "cersei", "tyrion", "kris_jenner", "kendrick"
@@ -431,7 +423,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", name: "sonata-stack", roster: [...ROSTER] });
+  res.json({ status: "ok", name: "sonata-stack", roster: [...ROSTER], transport: TRANSPORT_MODE });
 });
 
 const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -480,5 +472,6 @@ app.delete("/mcp", async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
+  console.error(`[startup] transport=${TRANSPORT_MODE} port=${PORT} endpoint=/mcp`);
   console.error(`Sonata Stack MCP server listening on port ${PORT}`);
 });
