@@ -17,6 +17,31 @@ import { execSimonCowell, execYonce, execDre, execHovOutreach } from "./agents/p
 
 let _anthropic: Anthropic | null = null;
 
+type TyrionJobStatus = "running" | "completed" | "failed";
+
+type TyrionJob = {
+  jobId: string;
+  status: TyrionJobStatus;
+  createdAt: string;
+  updatedAt: string;
+  city: string;
+  niche: string;
+  minScore: number;
+  summary?: {
+    city: string;
+    niche: string;
+    totalScouted: number;
+    qualified: number;
+    built: number;
+    outreached: number;
+    needsManualOutreach: number;
+    errors: string[];
+  };
+  error?: string;
+};
+
+const tyrionJobs = new Map<string, TyrionJob>();
+
 function getAnthropic(): Anthropic {
   if (!_anthropic) {
     const key = process.env.ANTHROPIC_API_KEY;
@@ -26,6 +51,58 @@ function getAnthropic(): Anthropic {
     _anthropic = new Anthropic({ apiKey: key });
   }
   return _anthropic;
+}
+
+async function runTyrionJob(jobId: string, niche: string, city: string, minScore: number) {
+  try {
+    console.error(`[Tyrion] Starting job ${jobId} for ${niche} in ${city}...`);
+    const { leads, scoutedRaw, qualifiedAndSaved } = await execSimonCowell(niche, city);
+
+    let built = 0;
+    let outreached = 0;
+    let needsManualOutreach = 0;
+    const errors: string[] = [];
+
+    await Promise.allSettled(
+      leads.map(async (lead: any) => {
+        try {
+          const yonceOut = await execYonce(lead.businessName, lead.placeId, lead.id);
+
+          if (yonceOut.opportunityScore >= minScore) {
+            const dreOut = await execDre(lead.id, lead.businessName, niche, yonceOut.rating, yonceOut);
+            built++;
+
+            if (lead.contactEmail) {
+              await execHovOutreach(lead.id, lead.businessName, lead.contactEmail, niche, dreOut.demoSiteUrl);
+              outreached++;
+            } else {
+              needsManualOutreach++;
+            }
+          }
+        } catch (err: any) {
+          console.error(`[Tyrion] lead failed: ${lead.businessName} — ${err.message}`);
+          errors.push(`${lead.businessName}: ${err.message}`);
+        }
+      })
+    );
+
+    const summary = { city, niche, totalScouted: scoutedRaw, qualified: qualifiedAndSaved, built, outreached, needsManualOutreach, errors };
+    tyrionJobs.set(jobId, {
+      ...(tyrionJobs.get(jobId) as TyrionJob),
+      status: "completed",
+      updatedAt: new Date().toISOString(),
+      summary,
+    });
+    console.error(`[Tyrion] Job ${jobId} complete:`, summary);
+  } catch (err: any) {
+    console.error(`[Tyrion] Job ${jobId} fatal error:`, err);
+    tyrionJobs.set(jobId, {
+      ...(tyrionJobs.get(jobId) as TyrionJob),
+      status: "failed",
+      updatedAt: new Date().toISOString(),
+      error: err.message,
+    });
+  }
 }
 
 function createServer(): McpServer {
@@ -227,50 +304,26 @@ function createServer(): McpServer {
     },
     async ({ niche, city, minScore }) => {
       try {
-        console.error(`[Tyrion] Starting orchestrator loop for ${niche} in ${city}...`);
-        
-        // 1. Scout Leads
-        const { leads, scoutedRaw, qualifiedAndSaved } = await execSimonCowell(niche, city);
-        
-        let built = 0;
-        let outreached = 0;
-        let needsManualOutreach = 0;
-        let errors: string[] = [];
+        const now = new Date().toISOString();
+        const jobId = crypto.randomUUID();
+        tyrionJobs.set(jobId, {
+          jobId,
+          status: "running",
+          createdAt: now,
+          updatedAt: now,
+          city,
+          niche,
+          minScore,
+        });
 
-        // 2. Process all leads in parallel (allSettled ensures completion instead of fail-fast)
-        await Promise.allSettled(
-          leads.map(async (lead: any) => {
-            try {
-              // 2a. Intel
-              const yonceOut = await execYonce(lead.businessName, lead.placeId, lead.id);
-              
-              if (yonceOut.opportunityScore >= minScore) {
-                // 2b. Build Asset
-                const dreOut = await execDre(lead.id, lead.businessName, niche, yonceOut.rating, yonceOut);
-                built++;
-                
-                if (lead.contactEmail) {
-                  // 2c. Send Outreach
-                  await execHovOutreach(lead.id, lead.businessName, lead.contactEmail, niche, dreOut.demoSiteUrl);
-                  outreached++;
-                } else {
-                  needsManualOutreach++;
-                }
-              }
-            } catch (err: any) {
-              console.error(`[Tyrion] lead failed: ${lead.businessName} — ${err.message}`);
-              errors.push(`${lead.businessName}: ${err.message}`);
-            }
-          })
-        );
-        
-        const summary = { city, niche, totalScouted: scoutedRaw, qualified: qualifiedAndSaved, built, outreached, needsManualOutreach, errors };
-        console.error(`[Tyrion] Pipeline run complete:`, summary);
-        
+        setImmediate(() => {
+          void runTyrionJob(jobId, niche, city, minScore);
+        });
+
         return { 
           content: [{ 
              type: "text" as const, 
-             text: JSON.stringify(summary)
+             text: JSON.stringify({ jobId, status: "running" })
           }] 
         };
       } catch (err: any) {
