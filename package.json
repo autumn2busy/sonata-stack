@@ -10,9 +10,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "start:deploy": "npm run build && npm run start",
-    "ci:dist-guard": "bash scripts/ci-dist-guard.sh"
+    "dev": "ts-node src/index.ts"
   },
   "keywords": [
     "mcp",
