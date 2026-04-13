@@ -1,175 +1,234 @@
 # CLAUDE.md — Sonata Stack Project Rules
 
-> This file is automatically read by Claude Code at the start of every session.
-> It sets behavioral expectations for any AI agent working on this codebase.
+> Auto-loaded by Claude Code at session start. Sets behavioral expectations for any AI agent touching this codebase.
+> **If a rule here conflicts with something a doc says, this file wins. Update the doc, not your behavior.**
 
 ---
 
-## ⚠️ MANDATORY READS — Before You Touch Anything
+## ⚠️ Read These Before You Touch Anything
 
-**Before modifying ANY Supabase query**, READ `docs/architecture/AgencyLead-Schema.md` or `docs/architecture/Client-Schema.md` (depending on which table).
-**Before debugging ANY agent failure**, READ `docs/playbooks/Debugging-Playbook.md`.
-**Before implementing ANY agent**, READ `docs/pipelines/Pipeline-Full-Outbound.md`.
-**Before starting ANY session**, READ `docs/lessons.md` and `docs/incidents/Incident-Log.md`.
+Run this checklist at the **start of every session**, no exceptions:
 
-These files are the source of truth. Do not ask the user for information that is already documented. Do not guess at column names, env var names, or agent behavior — look it up.
+1. `docs/lessons.md` — every mistake we've already paid for
+2. `docs/incidents/Incident-Log.md` — known past failures + fixes
+3. `docs/architecture/AgencyLead-Schema.md` — table contract (see ⚠️ caveat below)
+4. `docs/pipelines/Pipeline-Full-Outbound.md` — agent flow
+
+Before any **DB query**: re-read the relevant schema doc.
+Before any **agent debug**: read `docs/playbooks/Debugging-Playbook.md`.
+Before any **agent implementation or refactor**: read the pipeline doc.
+
+**Do not ask the user for information that is already documented.** If the docs are silent or contradict each other, say so explicitly and ask one targeted question — don't guess.
 
 ---
 
-## Critical Project Context
+## The Project in 60 Seconds
 
-### Database Naming Convention ⚠️
-The Supabase database uses **quoted camelCase** identifiers, NOT snake_case:
-- Table: `"AgencyLead"` (never `agency_leads` or `agency_lead`)
-- Full column reference: `docs/architecture/AgencyLead-Schema.md`
+**Sonata Stack** is the MCP server that runs FlyNerd's outbound agency pipeline. It exposes named agent tools (Simon, Yoncé, Dre, Hov, Tyrion, Kris, Cersei, Tiny, Kendrick) over Streamable HTTP. Railway hosts it. Claude.ai connects to it.
 
-**Before writing ANY Supabase `.from()`, `.update()`, `.select()`, or `.eq()` call, verify the exact table and column names in the schema doc.**
+**This is not the only writer.** A separate Next.js app (`flynerd-agency` repo) also writes to the same Supabase `"AgencyLead"` table from `app/api/agents/*`, `app/api/contact/`, `app/api/orchestrator/`, `app/api/webhooks/*`. **n8n** runs the `FlyNerd — AC Tag Sync to Supabase Status` workflow (id: `d42cyp27QDIqZczu`) which also writes status. Any rule that lives only in this file is a rule the other writers don't know about — flag cross-repo concerns explicitly.
 
-### Build & Deploy
-- Source: TypeScript in `src/`
-- Compiled: `dist/` (gitignored — never committed)
-- Railway builds from source using `npm run build`
-- **After any code change:** run `npm run build` locally AND verify `dist/` output before pushing
-- Verify: `grep -n "<search_term>" dist/index.js` to confirm fixes compiled
+---
 
-### Vercel Integration
-- Demo site project: `flynerd-demo-lead` deploys from `autumn2busy/flynerd_agency`
-- Team ID: `team_uSLsRZHA5u8JAkI9tVVipAFi`
-- Deploy hook and API token are in Railway env vars
+## Critical Contracts
 
-### Agent Implementation Status
+### 1. Database Naming — Quoted camelCase
 
-| Agent | Status | Location |
-|-------|--------|----------|
-| Simon Cowell | STUB | `src/index.ts` line ~23 |
-| Yoncé | IMPLEMENTED | `src/index.ts` line ~39 |
-| Dre | IMPLEMENTED | `src/index.ts` line ~161 |
-| Hov | STUB | `src/index.ts` line ~287 |
-| Tyrion | STUB | `src/index.ts` line ~332 |
-| Kris Jenner | STUB | `src/index.ts` line ~349 |
-| Cersei | STUB | `src/index.ts` line ~319 |
-| Tiny Harris | STUB | `src/index.ts` line ~304 |
+Table: `"AgencyLead"`. Columns: `camelCase` for pipeline columns, `snake_case` for inbound/tracking columns. The Supabase JS client **silently ignores wrong column names** — no error, just lost data. Always verify against the schema doc before writing `.from()`, `.update()`, `.select()`, or `.eq()`.
+
+Non-negotiables:
+
+- `id` is `text`, no default → supply `crypto.randomUUID()` on every INSERT
+- `updatedAt` has no default → set `new Date().toISOString()` on every INSERT/UPDATE
+- City lives in `location`, not `city`
+- Simon's raw discovery → `scoutData`, not `intelData`
+
+### 2. Status — Canonical 13 (CHECK constraint locked in prod)
+
+```
+PROSPECT, DISCOVERED, AUDITED, DEMO_BUILT, OUTREACH_SENT,
+REPLIED, CALL_BOOKED, CLOSED_WON, CLOSED_LOST,
+OUTREACH_EXHAUSTED, DEMO_EXPIRED, INBOUND_NEW, CLIENT_ACTIVE
+```
+
+Forbidden values (writing any of these will throw on the CHECK constraint): `BUILT`, `PITCHED`, `NEGOTIATING`, `ONBOARDING`, `CLOSED_ASSETS_BUILT`, `WON`, `LOST`, `EXPIRED`, `OUTREACHED`, log-message strings, integers.
+
+⚠️ **Known doc drift:** `AgencyLead-Schema.md` still lists pre-refactor status values (BUILT, NEGOTIATING, etc.). The canonical 13 above are the ground truth per the 2026-04-08 status refactor and the live `agency_lead_status_check` constraint. Update the schema doc before trusting it.
+
+### 3. Status vs Stage
+
+- **`status`** = lifecycle (the 13 values above). One source of truth for "where is this lead in the funnel."
+- **`stage`** = operational/CRM granularity (Pipeline 5 stages, AC stage IDs). Free-form text, not constrained at DB level (which is itself a known gap — see `2026-04-08-ground-truth-status-stage.md`).
+
+Never put CRM stage IDs (e.g. `"8"`) in `status`. Never put lifecycle values in `stage`. They are not interchangeable.
+
+### 4. Log Before You Return (Simon Crash Rule)
+
+Every error exit path in every MCP tool MUST `console.error("[AgentName] <context>:", err)` BEFORE returning `{ isError: true }` or throwing. The MCP framework converts errors into a generic client-facing string and erases the detail. **Server-side logs are the only forensic trail.** This rule was paid for in the 2026-04-08 Simon silent-crash incident — don't make us pay for it again.
+
+### 5. Build Verification
+
+TypeScript source in `src/`, compiled to `dist/` (gitignored). Railway compiles from source. Local testing uses `dist/`. **After any source change:**
+
+```bash
+npm run build
+grep -n "<your_change>" dist/index.js  # confirm it actually compiled
+```
+
+A correct `src/` with a stale `dist/` is the same as broken code.
 
 ---
 
 ## Working Rules
 
-### 1. Read the Docs First
-- Before any task, check if a relevant doc exists in `docs/`
-- Before debugging, check `docs/incidents/Incident-Log.md` for known issues
-- Before writing DB queries, check `docs/architecture/AgencyLead-Schema.md`
-- Do NOT ask the user for information that is already in the docs
+### Read First, Ask Second, Guess Never
 
-### 2. Plan First
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
-- If something goes sideways, STOP and re-plan immediately — don't keep pushing
-- Use plan mode for verification steps, not just building
-- Write detailed specs upfront to reduce ambiguity
+If `docs/` covers it, use it. If it doesn't, ask one specific question. Never invent column names, env var names, status values, or agent behavior.
 
-### 3. Subagent Strategy
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One task per subagent for focused execution
+### Plan Before You Build
 
-### 4. Self-Improvement Loop
-- After ANY correction from the user: update `docs/lessons.md` with the pattern
-- Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start
+For any task with 3+ steps or an architectural choice, write the plan to `tasks/todo.md` first, get it approved, then execute. If something goes sideways mid-execution, **stop and re-plan** — don't push through.
 
-### 5. Verification Before Done
-- Never mark a task complete without proving it works
-- Diff behavior between main and your changes when relevant
-- Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
-- **For Supabase changes:** verify column names match the schema doc
-- **For TypeScript changes:** verify `dist/` output matches `src/`
+### No Blind Retries
 
-### 6. Demand Elegance (Balanced)
-- For non-trivial changes: pause and ask "is there a more elegant way?"
-- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes — don't over-engineer
+If an MCP tool call fails twice with the same error, stop. Switch to local testing (`node dist/index.js` + `curl`). Three failed retries means you're guessing in production.
 
-### 7. Autonomous Bug Fixing
-- When given a bug report: just fix it. Don't ask for hand-holding
-- Point at logs, errors, failing tests then resolve them
-- Zero context switching required from the user
+### Subagents for Parallel Work
+
+Offload research, codebase exploration, and parallel analysis to subagents. Keep the main context focused on decisions and integration.
+
+### Verification Before Done
+
+A task is not done until you've proven it works. For DB changes: query and confirm the row. For tool changes: invoke and confirm the response. For TS changes: grep `dist/`. "Should work" doesn't ship.
+
+### Find the Root Cause
+
+No band-aids. No "let's just catch this and move on." If you don't understand why something failed, you haven't fixed it — you've muffled it.
+
+### Demand Elegance, Proportionally
+
+Non-trivial change → pause and ask "is this the elegant version, or the first version that compiled?" Trivial fix → just ship it. Don't over-engineer a one-line null check.
+
+### Capture Every Correction
+
+User corrects you → update `docs/lessons.md` with the pattern and a rule that prevents the repeat. Outage or production failure → update `docs/incidents/Incident-Log.md` with symptoms, root cause, fix, lesson. The point is to make the same mistake twice impossible.
 
 ---
 
-## Task Management
+## Agent Implementation Status
 
-1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
-2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Mark items complete as you go
-4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review section to `tasks/todo.md`
-6. **Capture Lessons**: Update `docs/lessons.md` after corrections
-7. **Log Incidents**: Update `docs/incidents/Incident-Log.md` after any outage or failure
+| Agent        | Status                           | Location                 | Notes                                                                                     |
+| ------------ | -------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
+| Simon Cowell | IMPLEMENTED (post-crash patched) | `src/index.ts` ~L27      | qualification.ts + per-item try/catch added 2026-04-08; verify logging on all error paths |
+| Yoncé        | IMPLEMENTED                      | `src/index.ts` ~L39      |                                                                                           |
+| Dre          | IMPLEMENTED                      | `src/index.ts` ~L161     | Codex V2 hardened (z.any() inputs, defensive parsing)                                     |
+| Hov          | STUB                             | `src/index.ts` ~L287     | Must use AC tag-trigger flow, not direct send                                             |
+| Tyrion       | STUB                             | `src/index.ts` ~L332     | Per-lead error isolation required                                                         |
+| Kris Jenner  | STUB                             | `src/index.ts` ~L349     | Triggered by AC `call_completed` tag                                                      |
+| Cersei       | STUB                             | `src/index.ts` ~L319     | Hourly sweep, sets `DEMO_EXPIRED` (NOT `EXPIRED`)                                         |
+| Tiny Harris  | STUB                             | `src/index.ts` ~L304     | Queries `"Client"` table, NOT `"AgencyLead"`                                              |
+| Kendrick     | STUB                             | `src/agents/kendrick.ts` | SEO/AEO execution                                                                         |
 
----
-
-## Core Principles
-
-- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
-- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
-- **No Blind Retries**: If an MCP tool call fails twice with the same error, switch to local testing. Never burn tokens retrying.
-- **Verify the Compiled Output**: This is a TypeScript project. The source being correct means nothing if `dist/` is stale.
-- **Docs Are Law**: If it's documented in `docs/`, follow it. If the docs are wrong, fix the docs AND the code.
+Update this table the moment status changes. A stale agent status table is how Simon got debugged for hours under the wrong assumption.
 
 ---
 
-## Debugging Agents
+## Testing Conventions
 
-See `docs/playbooks/Debugging-Playbook.md` for the full decision tree and local test commands.
+- **Test lead aliases:** `autumn.s.williams+<scenario>@gmail.com` (e.g. `+execution_stage`, `+execution_ac`, `+webhook`). Never test against real prospect emails.
+- **Local MCP test:** `node dist/index.js &` then `curl -X POST http://localhost:8080/mcp -H "Content-Type: application/json" -d '<jsonrpc payload>'`
+- **DB sanity check before any insert path test:**
+  ```sql
+  SELECT id, "placeId", "businessName", status, "createdAt"
+  FROM "AgencyLead"
+  WHERE "leadSource" IN ('simon_cowell', 'COLD')
+  ORDER BY "createdAt" DESC LIMIT 50;
+  ```
 
-Quick reference:
-1. **Do NOT retry more than twice**
-2. Check Railway runtime logs for `[Dre]`, `[Yoncé]`, `[Simon]` prefixed output
-3. If zero runtime logs: MCP connection is stale — disconnect/reconnect in Claude.ai
-4. Check `docs/incidents/Incident-Log.md` for known past failures
+---
+
+## ActiveCampaign / n8n Integration
+
+- Outreach tag: `FLYNERD_OUTREACH_PENDING` (NOT `outreach_ready`). This tag triggers the AC automation that actually sends the email. Hov never sends email directly.
+- AC sync writes go through `ac-sync-logic.ts` — no direct AC API calls scattered through agents.
+- AC pipelines + custom fields are IaC: `node create-ac-pipeline.mjs` and `node create-deal-fields.mjs`. Run before testing any AC-touching agent.
+- **n8n owns status writes triggered by AC tags** (workflow `d42cyp27QDIqZczu`). Tag mappings live in `2026-04-08-ac-tag-sync-workflow-spec.md`. If you're about to write logic that flips status based on an AC event, check whether n8n already does it — don't duplicate.
+- Pipeline IDs are hardcoded in `flynerd-agency` (`api/contact/route.ts` uses pipeline 3, stage 8). They drift from `create-ac-pipeline.mjs`. Verify before assuming.
+
+---
+
+## Vercel
+
+- Demo project: `flynerd-demo-lead`, deploys from `autumn2busy/flynerd_agency` (NOT `FN-real-estate` — that was the 2026-03-28 bug).
+- Team ID: `team_uSLsRZHA5u8JAkI9tVVipAFi`
+- Each retained client gets their own Vercel project. Never deploy client work to `flynerd-demo-lead`.
+
+---
+
+## Debugging — Quick Reference
+
+Full decision tree: `docs/playbooks/Debugging-Playbook.md`. Hot path:
+
+1. Generic `"Error occurred during tool execution"` + **zero** `[Agent]` logs in Railway → MCP connection stale. Disconnect/reconnect in Claude.ai settings. Not a code bug.
+2. Generic error + logs present → read the error. Match it to `Incident-Log.md`.
+3. "Supabase update failed" silently → almost always wrong column name. Re-check the schema doc.
+4. Zod validation error on inter-agent input → loosen to `z.any()` and validate inside the handler. Claude reshapes payloads.
+5. `npm run build` then `grep` your change in `dist/index.js`. If it's not there, Railway is running stale code.
 
 ---
 
 ## Change Logging
 
-After completing any task that modifies files, append to `docs/changelog.md`:
+After any task that modifies files, append (never overwrite) to `docs/changelog.md`:
 
 ```
 ### YYYY-MM-DD — [brief title]
 **Repo:** sonata-stack
-
 **Files changed:**
 - path/to/file.ts — what changed and why
-
 **Decisions made:**
-- any choices or tradeoffs
-
+- choices and tradeoffs
 **Notes:**
-- anything the owner should know
+- anything the owner needs to know
 
 ---
 ```
 
-Always append to the end of the file. Never overwrite previous entries.
+If the change touches DB schema, env vars, or AC config, also update the relevant doc in the same commit. Code-without-doc-update is how the schema doc went stale.
 
 ---
 
-## Docs Directory Structure
+## Docs Directory
 
 ```
 docs/
 ├── architecture/
-│   ├── AgencyLead-Schema.md      ← Pipeline leads (source of truth)
-│   └── Client-Schema.md          ← Retained clients (source of truth)
+│   ├── AgencyLead-Schema.md      ← Pipeline leads (⚠️ status section needs canonical-13 update)
+│   └── Client-Schema.md          ← Retained clients
 ├── pipelines/
-│   └── Pipeline-Full-Outbound.md ← Agent flow, inputs, outputs
+│   └── Pipeline-Full-Outbound.md ← Agent inputs/outputs/dependencies
 ├── playbooks/
-│   ├── Debugging-Playbook.md     ← How to debug failures
-│   └── Niche-Selection-Playbook.md ← Market strategy
+│   ├── Debugging-Playbook.md     ← Failure decision tree + local test commands
+│   └── Niche-Selection-Playbook.md
 ├── incidents/
-│   └── Incident-Log.md           ← Past failures + fixes
-├── lessons.md                    ← Mistake patterns to avoid
-└── changelog.md                  ← Running change log
+│   └── Incident-Log.md           ← Past failures, root causes, fixes
+├── specs/                         ← Refactor + workflow specs (status refactor, AC sync, pipeline 5)
+├── investigations/                ← Crash investigations (Simon, Codex, etc.)
+├── lessons.md                    ← Mistake patterns + preventive rules
+└── changelog.md                  ← Append-only change log
 ```
+
+---
+
+## Stop Conditions
+
+Stop and surface to the user immediately if:
+
+- Any test fails twice in a row
+- A rollback gets triggered
+- A new incident gets logged
+- You're about to change anything in a production AC pipeline
+- You're about to run a database migration
+- The docs and the code disagree on a contract (status values, column names, env vars) — do not pick a side silently
+
+---
