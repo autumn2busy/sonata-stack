@@ -79,6 +79,12 @@ A correct `src/` with a stale `dist/` is the same as broken code.
 
 ---
 
+## Hov Contract — Read Before Touching Anything Named "Hov"
+
+There are TWO distinct components named "Hov." This is a known foot-gun.
+Days have been lost to confusing them. Read this before writing or debugging
+anything in the outreach path.
+
 ## Working Rules
 
 ### Read First, Ask Second, Guess Never
@@ -195,6 +201,22 @@ After any task that modifies files, append (never overwrite) to `docs/changelog.
 ```
 
 If the change touches DB schema, env vars, or AC config, also update the relevant doc in the same commit. Code-without-doc-update is how the schema doc went stale.
+
+---
+
+## Agent Deletion Protocol
+
+Any task that deletes, collapses, or replaces a component, route, API endpoint, database column, or architectural primitive MUST:
+
+1. Log a changelog entry with the literal prefix "DELETED:" in the title
+2. List the deleted artifact(s) by file path
+3. List what replaces them (by file path) or confirm nothing replaces them
+4. State the reason in 1-2 sentences
+5. Be flagged for owner review before merge, not after
+
+Consolidation is a form of deletion. Refactoring that removes a component the owner has previously seen in the codebase counts as deletion.
+
+If in doubt, ask the owner before deleting. A clarifying question costs 5 minutes. A silent deletion costs hours of reverse-engineering.
 
 ---
 
