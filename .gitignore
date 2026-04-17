@@ -2,3 +2,15 @@ node_modules/
 dist/
 .env
 *.js.map
+
+# AIDesigner
+.aidesigner/
+.mcp.json.aidesigner-backup
+
+# scratch / debugging files (root-scoped so src/ and scripts/ paths are unaffected)
+/local.stderr
+/local.stdout
+/local-*.log
+/req.json
+/smoke-test.mjs
+/test-*.mjs
