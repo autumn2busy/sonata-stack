@@ -105,6 +105,20 @@
 - **FN-real-estate** is DEPRECATED. Don't add code there.
 - The aspirational rule "The Face calls Sonata Stack via MCP, never the reverse" is **not yet true.** Until flynerd_agency's agent routes are migrated out, treat all three writers as live.
 
+## Secrets Handling
+
+### 2026-04-18 — Live Stripe key leaked to conversation transcript
+
+- **What happened:** When looking up which env var name the project used for Stripe, I ran the Grep tool against `flynerd-agency/.env` with pattern `^(STRIPE_[A-Z_]+)=` and `output_mode: "content"`. Grep returns full matching LINES in content mode, not just capture groups. The live `STRIPE_API_KEY=sk_live_...` landed verbatim in the conversation transcript.
+- **Cost:** User had to rotate the live Stripe secret key and update it in Vercel + flynerd-agency/.env. Low operational cost because the key was only seen in a single private session, but the loss of a live secret is the kind of thing that ends careers if the transcript leaks.
+- **Rule:** Never grep `.env`, `.env.local`, `.env.production`, or any file likely to contain secrets with `output_mode: "content"`. Accepted alternatives, in order of preference:
+  1. Ask the user directly: "What's the env var name you use for X?"
+  2. Use `output_mode: "count"` to check existence without surfacing values.
+  3. Use `Grep` with `output_mode: "files_with_matches"` to confirm presence.
+  4. If you must read names, pipe through a one-shot script that strips values BEFORE the tool returns.
+- **Blast radius:** Applies to every repo in the workspace. Flynerd-agency, sonata-stack, FN-real-estate, command-center. Every future agent session.
+- **Prevention:** CLAUDE.md (this file) now carries the rule. When onboarding a new model, the lesson loads at session start.
+
 ## Niche Awareness
 
 - **Nested Objects** is a separate business — mortgage services / field inspections, NOT legal/financial. Do not conflate with FlyNerd work or with each other.

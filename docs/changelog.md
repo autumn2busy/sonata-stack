@@ -89,3 +89,34 @@
 - Simon Cowell returns a stub response (not implemented yet), confirming transport works
 
 ---
+
+### 2026-04-18 — Prompt C: Kris Jenner webhook wired + agent de-stubbed
+**Repo:** sonata-stack
+
+**Files changed:**
+- `src/webhook.ts` — renamed route `/webhook/post-call` → `/webhooks/ac/call-completed`, parses AC payload shape (deal context from URL query params, contact context from form-encoded POST body). Returns 202 immediately and dispatches `runKrisJennerClose` via `setImmediate` so Kris's 15-60s work doesn't block AC's webhook timeout.
+- `src/agents/kris.ts` — full de-stub. Real Supabase lookup via `getLeadById`, real `execDre` call for demo rebuild, status snapshot/restore around Dre's side-effect, real Stripe Checkout Session via inline `price_data`, Claude `claude-haiku-4-5-20251001` email draft, AC writeback to contact field 171 (CLOSE_DEMO_URL).
+- `src/index.ts` — `kris_jenner` MCP tool signature updated to new input shape `{ agencyLeadId, contactId, dealId, dealValueDollars? }`. Dropped `websiteUrl` because Kris uses cached intel, not a fresh scrape.
+- `src/lib/stripe.ts` — NEW. Lazy-initialized Stripe client + `createCloseCheckoutSession` helper using inline `price_data` so no pre-existing Stripe Product is required.
+- `src/lib/ac.ts` — NEW. Minimal AC helper for sonata-stack (`updateContactField`). Mirrors flynerd-agency's helper.
+- `CLAUDE.md` — agent status table: Kris Jenner STUB → IMPLEMENTED (2026-04-18).
+- `docs/specs/2026-04-18-kris-jenner-webhook.md` — NEW. Full AC automation config spec (URL format, headers, body shape, env vars, manual activation steps).
+- `docs/lessons.md` — NEW lesson: "Never grep `.env` with `output_mode: content`" (live Stripe key leak incident).
+- `package.json` — added `stripe ^22.0.2` dependency.
+
+**Decisions made:**
+- Chose Stripe Checkout Sessions API (not Payment Links) because Sessions support inline `price_data` — no pre-created Stripe Product required. Matches owner's "no Stripe products yet" constraint.
+- Kris reuses the same demo URL rather than generating a new one. Dre's `getCanonicalDemoUrl(leadId)` is deterministic, and the prospect already has the URL from cold outreach. Rebuilding refreshes content in place.
+- Status snapshot/restore around Dre call: Dre unconditionally writes `status=DEMO_BUILT`. That's correct for round 1 but wrong post-call. Kris snapshots original status before and restores after. One extra DB write, avoids forking `execDre`.
+- Stripe amount: uses AC `%DEAL_VALUE%` if parsable, else falls back to $2,500 default (matches `flynerd-agency` outreach route's `dealValue = 250000`).
+- Email is drafted only, not sent. AC automation sends the templated email with `%CLOSE_DEMO_URL%` personalization. Kris's draft is for owner visibility in logs.
+- `client_id` (166), `niche` (167), `demo_url` (168) are in the webhook payload but intentionally unused by Kris this iteration. They're referenced in the parser for resilience but not read.
+
+**Notes:**
+- AC automation "FlyNerd — Call Completed Post-Call Close" remains **DRAFT**. Do NOT activate until: STRIPE_API_KEY rotated + set on Railway, ACTIVECAMPAIGN_URL/KEY + WEBHOOK_SECRET set on Railway, sonata-stack deployed, end-to-end smoke test with `autumn.s.williams+kris_smoke@gmail.com` lead passes.
+- Discovery-notes capture (Google Meet transcript → structured notes → AC deal note) remains future work. When wired, Kris reads those notes and passes them into Dre config + Claude prompt.
+- AgencyLead → Client transition on successful Stripe payment is still the separate n8n workflow (decision #8) — not this commit.
+
+---
+
+---
