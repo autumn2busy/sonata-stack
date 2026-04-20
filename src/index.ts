@@ -340,15 +340,16 @@ function createServer(): McpServer {
   // ─────────────────────────────────────────────
   server.tool(
     "kris_jenner",
-    "Post-strategy-call closer asset builder. Triggered by AC tag call_completed. Runs Yoncé on the prospect's actual website, builds a personalized demo via Dre, populates DEAL_DEMOSITEURL, and sends the close email. Turns the strategy call into a brand deal.",
+    "Post-strategy-call closer. Rebuilds the demo via Dre using cached intel, creates a real Stripe checkout session for the close price, drafts the close email via Claude, and writes close_demo_url back to AC contact field 171. Triggered by AC tag CALL_COMPLETED via the /webhooks/ac/call-completed webhook.",
     {
+      agencyLeadId: z.string().describe("Supabase AgencyLead.id (AC contact field 165)"),
       contactId: z.string().describe("ActiveCampaign contact ID"),
       dealId: z.string().describe("ActiveCampaign deal ID"),
-      websiteUrl: z.string().describe("Prospect's current website URL"),
+      dealValueDollars: z.number().optional().describe("AC deal value in dollars; falls back to default close price when omitted"),
     },
-    async ({ contactId, dealId, websiteUrl }) => {
+    async ({ agencyLeadId, contactId, dealId, dealValueDollars }) => {
       try {
-        const closeAsset = await runKrisJennerClose({ contactId, dealId, websiteUrl });
+        const closeAsset = await runKrisJennerClose({ agencyLeadId, contactId, dealId, dealValueDollars });
         return {
           content: [{
             type: "text" as const,
@@ -356,7 +357,8 @@ function createServer(): McpServer {
           }]
         };
       } catch (err: any) {
-        return { content: [{ type: "text" as const, text: `Kris Error: ${err.message}` }], isError: true };
+        console.error("[Kris Jenner MCP tool] failed:", err?.message || err);
+        return { content: [{ type: "text" as const, text: `Kris Error: ${err?.message || err}` }], isError: true };
       }
     }
   );
