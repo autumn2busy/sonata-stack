@@ -13,6 +13,12 @@ import {
 // AC post-call close email can personalize with %CLOSE_DEMO_URL%.
 const CONTACT_FIELD_CLOSE_DEMO_URL = "171";
 
+// Contact-level AC custom field that holds the per-deal Stripe Checkout
+// Session URL. The AC post-call close email uses %OFFER_SLUG% as the href
+// on the "Pay deposit" button so each prospect sees a single-use checkout
+// URL personalized to their deal.
+const CONTACT_FIELD_OFFER_SLUG = "173";
+
 let _anthropic: Anthropic | null = null;
 
 function getAnthropic(): Anthropic {
@@ -202,19 +208,64 @@ Write the exact email body to send. Requirements:
       ? completion.content[0].text.trim()
       : "";
 
-  // 7. AC writeback — close_demo_url to contact field 171
-  try {
-    await updateContactField(contactId, CONTACT_FIELD_CLOSE_DEMO_URL, closeDemoUrl);
-    console.error(
-      `[Kris Jenner] wrote close_demo_url to AC contact field ${CONTACT_FIELD_CLOSE_DEMO_URL} for contactId=${contactId}`,
+  // 7. AC writeback — close_demo_url to field 171 and (if Stripe succeeded)
+  //    paymentLink to field 173. Written in parallel to minimize latency.
+  //    Either write can fail independently; we surface both in warnings.
+  const writePromises: Array<Promise<void>> = [];
+
+  writePromises.push(
+    (async () => {
+      try {
+        await updateContactField(
+          contactId,
+          CONTACT_FIELD_CLOSE_DEMO_URL,
+          closeDemoUrl,
+        );
+        console.error(
+          `[Kris Jenner] wrote close_demo_url to AC contact field ${CONTACT_FIELD_CLOSE_DEMO_URL} for contactId=${contactId}`,
+        );
+      } catch (err: any) {
+        console.error(
+          `[Kris Jenner] failed to write close_demo_url to AC:`,
+          err?.message || err,
+        );
+        warnings.push("ac_writeback_close_demo_url_failed");
+      }
+    })(),
+  );
+
+  if (paymentLink) {
+    writePromises.push(
+      (async () => {
+        try {
+          await updateContactField(
+            contactId,
+            CONTACT_FIELD_OFFER_SLUG,
+            paymentLink,
+          );
+          console.error(
+            `[Kris Jenner] wrote paymentLink to AC contact field ${CONTACT_FIELD_OFFER_SLUG} for contactId=${contactId}`,
+          );
+        } catch (err: any) {
+          console.error(
+            `[Kris Jenner] failed to write paymentLink to AC:`,
+            err?.message || err,
+          );
+          warnings.push("ac_writeback_offer_slug_failed");
+        }
+      })(),
     );
-  } catch (err: any) {
+  } else {
+    // No Stripe session was created (stripe_session_failed already logged).
+    // Leave field 173 unchanged; the email's Pay button will render with
+    // whatever stale value is in the field (usually empty on first run).
     console.error(
-      `[Kris Jenner] failed to write close_demo_url to AC:`,
-      err?.message || err,
+      `[Kris Jenner] skipping paymentLink writeback to AC field ${CONTACT_FIELD_OFFER_SLUG} because Stripe session was not created`,
     );
-    warnings.push("ac_writeback_failed");
+    warnings.push("ac_writeback_offer_slug_skipped_no_stripe");
   }
+
+  await Promise.all(writePromises);
 
   console.error(
     `[Kris Jenner] done agencyLeadId=${agencyLeadId} closeDemoUrl=${closeDemoUrl} paymentLink=${paymentLink ? "SET" : "MISSING"}`,
