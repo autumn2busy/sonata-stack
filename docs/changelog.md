@@ -169,3 +169,39 @@
 - Landing-v2 FinalCTA rewrite (flynerd-agency side) is the sibling commit — new copy: "Ready when you are." + "$750 deposit" primary CTA + trust strip. Same turn, different repo.
 
 ---
+
+### 2026-04-21 — DELETED: Kris no longer rebuilds demo or writes to field 171
+
+**Repo:** sonata-stack
+
+**Deleted artifacts:**
+- `src/agents/kris.ts` — removed `execDre` rebuild call, `updateLeadStatus` status-restore dance, `CONTACT_FIELD_CLOSE_DEMO_URL = "171"` constant, and the field 171 AC writeback. `closeDemoUrl` field removed from `KrisJennerResult` interface.
+- `src/index.ts` — MCP tool `kris_jenner` description updated to reflect the narrower responsibility.
+
+**What replaces them:** nothing. Kris's responsibility shrunk, it did not move.
+
+**Reason:** The field architecture was clarified by Autumn: field 168 (%DEMOURL%) is the initial outreach demo set by Dre during cold outreach; field 171 (%CLOSE_DEMO_URL%) is the finalized production URL set by a future post-build launch process AFTER the 7-day build completes, not at call-completed time. Kris was overbuilt: it was rebuilding a demo the prospect already had, writing to a field it shouldn't touch, and doing an unnecessary status snapshot/restore dance to clean up after Dre.
+
+**Files changed:**
+- `src/agents/kris.ts` — simplified from 7 steps to 5. Kris's single job is now: classify profile, create Stripe session, write paymentLink to field 173. Email draft is now an internal-only Claude summary for owner visibility in logs (the prospect email is AC-templated using %DEMOURL% + %OFFER_SLUG%, not the Claude-drafted body).
+- `src/index.ts` — MCP tool description revised to "classifies qualification profile, creates a profile-aware Stripe Checkout Session, and writes the payment link to AC contact field 173. Does NOT rebuild the demo or touch fields 168/171."
+- `docs/specs/2026-04-21-ac-post-call-close-email.md` — rewritten. Email body now references `%DEMOURL%` (field 168) for the demo-review button and `%OFFER_SLUG%` (field 173) for the pay-deposit button. `%CLOSE_DEMO_URL%` removed entirely. Subject line + preheader + primary framing rewritten so the pay button leads and the demo link is secondary. Updated the race-condition analysis (Kris now runs in 2-5s warm / 10-15s cold, so 60s wait is generous headroom).
+- `CLAUDE.md` — Kris agent status row updated.
+
+**Decisions made:**
+- Reordered the email blocks so the pay button is the primary visual anchor (Block 2). The demo link is demoted to Block 4 with "still live if you want to share it with your team" framing. The closer's job is conversion, not demo re-introduction.
+- Kept the Supabase lookup in Kris even though Dre's no longer called. Reason: we still need `businessName` for the Stripe product name and `niche` + `intelData` for the profile classifier.
+- Kept the Claude draft but repurposed. Previously it drafted the prospect-facing email body (never sent, since AC sends the templated version). Now it drafts an internal 3-4 sentence summary for owner visibility in Railway logs. Lower cognitive load for Autumn when reviewing log traffic.
+- Wrapped the Claude draft call in try/catch with a `claude_draft_failed` warning. Previously a Claude API outage would crash Kris entirely; now it degrades gracefully.
+
+**Verification:**
+- `npm run build` passed.
+- `grep` on dist/ confirms zero references to `CONTACT_FIELD_CLOSE_DEMO_URL` or `close_demo_url`.
+- `grep` on dist/ confirms `CONTACT_FIELD_OFFER_SLUG` is present (4 refs).
+
+**Notes / pending:**
+- Field 171 (%CLOSE_DEMO_URL%) is now a no-op in sonata-stack. When the post-build launch process is built, that process will own writing field 171. Until then, the field sits empty on all contacts — harmless because no email template references it.
+- flynerd-agency's demo page at `app/demo/[leadId]/page.tsx` is unaffected; it renders based on the AgencyLead row in Supabase, not the AC field. The URL in field 168 (written by Dre during outreach) points at that same demo page.
+- Smoke test runbook in `docs/specs/2026-04-21-ac-post-call-close-email.md` is the authoritative test plan for the full flow.
+
+---

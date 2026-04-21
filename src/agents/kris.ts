@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { getLeadById, updateLeadStatus } from "../lib/db.js";
-import { execDre } from "./pipeline.js";
+import { getLeadById } from "../lib/db.js";
 import { createCloseCheckoutSession } from "../lib/stripe.js";
 import { updateContactField } from "../lib/ac.js";
 import {
@@ -9,14 +8,18 @@ import {
   profileProductName,
 } from "../lib/profile.js";
 
-// Contact-level AC custom field that holds the close-asset demo URL so the
-// AC post-call close email can personalize with %CLOSE_DEMO_URL%.
-const CONTACT_FIELD_CLOSE_DEMO_URL = "171";
-
 // Contact-level AC custom field that holds the per-deal Stripe Checkout
 // Session URL. The AC post-call close email uses %OFFER_SLUG% as the href
 // on the "Pay deposit" button so each prospect sees a single-use checkout
 // URL personalized to their deal.
+//
+// We intentionally do NOT touch field 168 (%DEMOURL%, initial cold-outreach
+// demo) or field 171 (%CLOSE_DEMO_URL%, finalized production URL). Field 168
+// was populated during the outreach pipeline (Dre's original build). Field
+// 171 belongs to a future post-build launch process that finalizes the
+// production URL after the 7-day build completes. Kris is a CLOSER, not a
+// rebuilder — its only job on call-completed is to generate the Stripe
+// checkout link the prospect will click to pay their deposit.
 const CONTACT_FIELD_OFFER_SLUG = "173";
 
 let _anthropic: Anthropic | null = null;
@@ -35,9 +38,9 @@ function getAnthropic(): Anthropic {
 export interface KrisJennerInput {
   /** Supabase AgencyLead.id — the primary key we do all lookups by. */
   agencyLeadId: string;
-  /** AC contact ID — used for the AC writeback of the close demo URL. */
+  /** AC contact ID — used for the AC writeback of the payment link. */
   contactId: string;
-  /** AC deal ID — used for Stripe metadata + later AC deal writeback. */
+  /** AC deal ID — used for Stripe metadata. */
   dealId: string;
   /**
    * AC deal value in dollars (optional). When present, overrides the
@@ -53,8 +56,11 @@ export interface KrisJennerResult {
   contactId: string;
   dealId: string;
   businessName: string;
-  closeDemoUrl: string;
+  /** Per-deal Stripe Checkout Session URL. Empty if Stripe creation failed. */
   paymentLink: string;
+  /** Internal-only email body drafted by Claude for owner visibility in logs.
+   *  Not sent by Kris — AC's automation sends the templated email using
+   *  %DEMOURL% and %OFFER_SLUG% personalization. */
   emailDraft: string;
   warnings: string[];
 }
@@ -65,21 +71,29 @@ export interface KrisJennerResult {
  * Invoked when the AC CALL_COMPLETED tag fires a webhook at
  * /webhooks/ac/call-completed (see src/webhook.ts).
  *
+ * Kris's single job: generate a per-deal Stripe Checkout Session URL and
+ * write it to AC contact field 173 (%OFFER_SLUG%) so the automation's
+ * "Pay deposit" button has a personalized href.
+ *
+ * Kris does NOT:
+ *   - Rebuild the demo. The original outreach demo at field 168 (%DEMOURL%)
+ *     is what the prospect already saw and what the post-call email still
+ *     references.
+ *   - Touch field 171 (%CLOSE_DEMO_URL%). That field belongs to a future
+ *     post-build finalization process that writes the production URL after
+ *     the 7-day build completes.
+ *   - Modify Supabase status. The lead stays in CALL_BOOKED (or whatever
+ *     status the outreach + call-scheduling flow put it in) until payment
+ *     lands and n8n transitions it to CLIENT_ACTIVE.
+ *
  * Flow:
- *   1. Supabase lookup by agency_lead_id (AC contact field 165).
- *   2. Classify qualification profile from niche + intelData (matches
- *      flynerd-agency/components/demo/nicheConfig.ts). Determines which
- *      deposit amount and product name go to Stripe.
- *   3. Rebuild the demo via Dre using the enriched intel we already have
- *      (same demo URL — Dre's getCanonicalDemoUrl(leadId) is deterministic).
- *   4. Restore lead status to what it was before Dre's write (Dre sets
- *      status=DEMO_BUILT as a side effect, which is wrong for post-call).
- *   5. Create a real Stripe Checkout Session via inline price_data with
- *      profile-specific amount + product name. AC deal value overrides
- *      the profile default when explicitly set.
- *   6. Draft close email via Claude using real lead context.
- *   7. Write close_demo_url back to AC contact field 171 so AC's post-call
- *      email template can reference %CLOSE_DEMO_URL%.
+ *   1. Supabase lookup — needs businessName + niche + intelData for the
+ *      Stripe product name and profile classifier.
+ *   2. Classify qualification profile (underserved_local vs tech_enabled_premium).
+ *   3. Create Stripe Checkout Session via inline price_data with profile-
+ *      specific amount + product name. AC deal value overrides when set.
+ *   4. Draft internal Claude email (logs-only, for owner visibility).
+ *   5. Write paymentLink to AC contact field 173.
  */
 export async function runKrisJennerClose(
   input: KrisJennerInput,
@@ -100,15 +114,10 @@ export async function runKrisJennerClose(
   }
   const businessName: string = lead.businessName;
   const niche: string = lead.niche;
-  const originalStatus: string = lead.status;
   const intelData =
     lead.intelData && typeof lead.intelData === "object"
       ? (lead.intelData as Record<string, unknown>)
       : {};
-  const rating =
-    typeof (intelData as any).rating === "number"
-      ? (intelData as any).rating
-      : 0;
 
   // 2. Classify qualification profile (drives deposit amount + product name)
   const profile = getQualificationProfile({ niche, intelData });
@@ -116,35 +125,7 @@ export async function runKrisJennerClose(
     `[Kris Jenner] qualification profile: ${profile} (niche="${niche}")`,
   );
 
-  // 3. Rebuild demo via Dre (same URL — refreshes content with enriched data)
-  console.error(`[Kris Jenner] invoking Dre for leadId=${agencyLeadId}`);
-  const dreResult = await execDre(
-    agencyLeadId,
-    businessName,
-    niche,
-    rating,
-    intelData,
-  );
-  const closeDemoUrl: string = dreResult.demoSiteUrl;
-
-  // 4. Restore original status — execDre set status=DEMO_BUILT, which is
-  //    wrong for post-call context (prospect is past DEMO_BUILT).
-  if (originalStatus && originalStatus !== "DEMO_BUILT") {
-    try {
-      await updateLeadStatus(agencyLeadId, originalStatus);
-      console.error(
-        `[Kris Jenner] restored status to ${originalStatus} (was overwritten to DEMO_BUILT by Dre)`,
-      );
-    } catch (err: any) {
-      console.error(
-        `[Kris Jenner] failed to restore status to ${originalStatus}:`,
-        err?.message || err,
-      );
-      warnings.push("status_restore_failed");
-    }
-  }
-
-  // 5. Real Stripe Checkout Session (inline price_data, profile-aware amount)
+  // 3. Stripe Checkout Session (inline price_data, profile-aware amount)
   let paymentLink = "";
   try {
     const profileDefaultCents = PROFILE_DEPOSIT_CENTS[profile];
@@ -164,12 +145,15 @@ export async function runKrisJennerClose(
       `[Kris Jenner] stripe session created id=${session.sessionId} profile=${profile} amountCents=${amountCents} (profileDefault=${profileDefaultCents})`,
     );
   } catch (err: any) {
-    console.error("[Kris Jenner] stripe session creation failed:", err?.message || err);
+    console.error(
+      "[Kris Jenner] stripe session creation failed:",
+      err?.message || err,
+    );
     warnings.push("stripe_session_failed");
     paymentLink = "";
   }
 
-  // 6. Draft close email via Claude
+  // 4. Draft internal Claude email (logs-only, for owner visibility)
   const painPoints = Array.isArray((intelData as any).painPoints)
     ? ((intelData as any).painPoints as string[])
     : [];
@@ -178,97 +162,63 @@ export async function runKrisJennerClose(
       ? painPoints.map((p) => `- ${p}`).join("\n")
       : "- (no specific pain points captured)";
 
-  const systemPrompt = `You are Kris, FlyNerd's top closer architect. Your job is to draft a short post-strategy-call closing email.
-We just audited the prospect's business and rebuilt their personalized demo.
+  const systemPrompt = `You are Kris, FlyNerd's closer architect. Draft a short internal note summarizing the post-call close state for this lead. This note is for the FlyNerd team's visibility in logs — NOT sent to the prospect. The actual prospect email is a templated AC send using %DEMOURL% and %OFFER_SLUG% personalization.
 
 Context:
 - Business: ${businessName}
 - Niche: ${niche}
-- Close demo URL: ${closeDemoUrl}
-- Stripe checkout link: ${paymentLink || "(Stripe link unavailable — ask prospect to reply for invoice)"}
-- Known pain points:
+- Qualification profile: ${profile}
+- Stripe checkout link: ${paymentLink || "(Stripe link unavailable — check Railway logs)"}
+- Known pain points from intel:
 ${painPointsBlock}
 
-Write the exact email body to send. Requirements:
-- Under 180 words.
-- Reference one concrete pain point.
-- Include the close demo URL and the Stripe checkout link as clickable lines.
-- End with a single strong CTA: "Click the link below to lock in your build today."
-- No hallucinated placeholders, no Lorem ipsum, no em dashes.`;
+Write a 3-4 sentence internal summary covering: whether the Stripe session was created successfully, the qualification profile, one pain point that came up in the intel, and one recommended next step for the account owner. No em dashes, no Lorem ipsum, plain text only.`;
 
-  const completion = await getAnthropic().messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 600,
-    system: systemPrompt,
-    messages: [{ role: "user", content: "Draft the post-call closing email." }],
-  });
-
-  const emailDraft =
-    completion.content[0]?.type === "text"
-      ? completion.content[0].text.trim()
-      : "";
-
-  // 7. AC writeback — close_demo_url to field 171 and (if Stripe succeeded)
-  //    paymentLink to field 173. Written in parallel to minimize latency.
-  //    Either write can fail independently; we surface both in warnings.
-  const writePromises: Array<Promise<void>> = [];
-
-  writePromises.push(
-    (async () => {
-      try {
-        await updateContactField(
-          contactId,
-          CONTACT_FIELD_CLOSE_DEMO_URL,
-          closeDemoUrl,
-        );
-        console.error(
-          `[Kris Jenner] wrote close_demo_url to AC contact field ${CONTACT_FIELD_CLOSE_DEMO_URL} for contactId=${contactId}`,
-        );
-      } catch (err: any) {
-        console.error(
-          `[Kris Jenner] failed to write close_demo_url to AC:`,
-          err?.message || err,
-        );
-        warnings.push("ac_writeback_close_demo_url_failed");
-      }
-    })(),
-  );
-
-  if (paymentLink) {
-    writePromises.push(
-      (async () => {
-        try {
-          await updateContactField(
-            contactId,
-            CONTACT_FIELD_OFFER_SLUG,
-            paymentLink,
-          );
-          console.error(
-            `[Kris Jenner] wrote paymentLink to AC contact field ${CONTACT_FIELD_OFFER_SLUG} for contactId=${contactId}`,
-          );
-        } catch (err: any) {
-          console.error(
-            `[Kris Jenner] failed to write paymentLink to AC:`,
-            err?.message || err,
-          );
-          warnings.push("ac_writeback_offer_slug_failed");
-        }
-      })(),
+  let emailDraft = "";
+  try {
+    const completion = await getAnthropic().messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: systemPrompt,
+      messages: [
+        { role: "user", content: "Draft the internal close summary." },
+      ],
+    });
+    emailDraft =
+      completion.content[0]?.type === "text"
+        ? completion.content[0].text.trim()
+        : "";
+  } catch (err: any) {
+    console.error(
+      "[Kris Jenner] claude draft failed (non-blocking):",
+      err?.message || err,
     );
+    warnings.push("claude_draft_failed");
+  }
+
+  // 5. AC writeback — paymentLink to field 173 (skip when Stripe failed)
+  if (paymentLink) {
+    try {
+      await updateContactField(contactId, CONTACT_FIELD_OFFER_SLUG, paymentLink);
+      console.error(
+        `[Kris Jenner] wrote paymentLink to AC contact field ${CONTACT_FIELD_OFFER_SLUG} for contactId=${contactId}`,
+      );
+    } catch (err: any) {
+      console.error(
+        `[Kris Jenner] failed to write paymentLink to AC:`,
+        err?.message || err,
+      );
+      warnings.push("ac_writeback_offer_slug_failed");
+    }
   } else {
-    // No Stripe session was created (stripe_session_failed already logged).
-    // Leave field 173 unchanged; the email's Pay button will render with
-    // whatever stale value is in the field (usually empty on first run).
     console.error(
       `[Kris Jenner] skipping paymentLink writeback to AC field ${CONTACT_FIELD_OFFER_SLUG} because Stripe session was not created`,
     );
     warnings.push("ac_writeback_offer_slug_skipped_no_stripe");
   }
 
-  await Promise.all(writePromises);
-
   console.error(
-    `[Kris Jenner] done agencyLeadId=${agencyLeadId} closeDemoUrl=${closeDemoUrl} paymentLink=${paymentLink ? "SET" : "MISSING"}`,
+    `[Kris Jenner] done agencyLeadId=${agencyLeadId} paymentLink=${paymentLink ? "SET" : "MISSING"}`,
   );
 
   return {
@@ -277,7 +227,6 @@ Write the exact email body to send. Requirements:
     contactId,
     dealId,
     businessName,
-    closeDemoUrl,
     paymentLink,
     emailDraft,
     warnings,

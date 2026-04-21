@@ -340,7 +340,7 @@ function createServer(): McpServer {
   // ─────────────────────────────────────────────
   server.tool(
     "kris_jenner",
-    "Post-strategy-call closer. Rebuilds the demo via Dre using cached intel, creates a real Stripe checkout session for the close price, drafts the close email via Claude, and writes close_demo_url back to AC contact field 171. Triggered by AC tag CALL_COMPLETED via the /webhooks/ac/call-completed webhook.",
+    "Post-strategy-call closer. Classifies the lead's qualification profile, creates a profile-aware Stripe Checkout Session for the deposit, and writes the payment link to AC contact field 173 (%OFFER_SLUG%). Does NOT rebuild the demo or touch fields 168/171 — those belong to the outreach and post-build-finalization flows respectively. Triggered by AC tag CALL_COMPLETED via the /webhooks/ac/call-completed webhook.",
     {
       agencyLeadId: z.string().describe("Supabase AgencyLead.id (AC contact field 165)"),
       contactId: z.string().describe("ActiveCampaign contact ID"),
