@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL as NodeURL } from "node:url";
 import querystring from "node:querystring";
 import { runKrisJennerClose } from "./agents/kris.js";
+import { runWarmApply, type WarmApplyInput } from "./agents/warmApply.js";
 
 const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || "3100", 10);
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
@@ -190,6 +191,114 @@ export function startWebhookServer() {
           .catch((err: any) => {
             console.error(
               `[webhook] kris_jenner FAILED agencyLeadId=${payload.agencyLeadId}:`,
+              err?.message || err,
+            );
+          });
+      });
+      return;
+    }
+
+    // POST /webhooks/warm-apply — fired by flynerd-agency /api/apply when
+    // a prospect completes the qualification form. Runs the warm-lead demo
+    // pipeline (skip scout/enrich, go straight to Dre) and writes the
+    // resulting %DEMOURL% back to AC contact field 168.
+    if (req.method === "POST" && pathname === "/webhooks/warm-apply") {
+      if (!verifySecret(req)) {
+        console.error("[webhook] warm-apply rejected: bad or missing x-webhook-secret");
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+
+      let body = "";
+      try {
+        body = await readBody(req);
+      } catch (err: any) {
+        console.error("[webhook] warm-apply: failed to read body:", err?.message || err);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid body" }));
+        return;
+      }
+
+      let parsed: Partial<WarmApplyInput>;
+      try {
+        parsed = JSON.parse(body) as Partial<WarmApplyInput>;
+      } catch (err: any) {
+        console.error("[webhook] warm-apply: JSON parse failed:", err?.message || err);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+        return;
+      }
+
+      // Required fields guard — mirror the server-side validation in
+      // flynerd-agency /api/apply so we don't attempt a Dre run on a
+      // half-populated payload that would produce a broken demo.
+      const required: Array<keyof WarmApplyInput> = [
+        "email",
+        "name",
+        "businessName",
+        "websiteUrl",
+        "niche",
+        "services",
+        "painPoint",
+        "leadVolume",
+        "timeline",
+      ];
+      const missing = required.filter((k) => {
+        const v = parsed[k];
+        return typeof v !== "string" || v.trim() === "";
+      });
+      if (missing.length > 0) {
+        console.error(
+          `[webhook] warm-apply: missing required fields: ${missing.join(", ")}`,
+        );
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: `Missing required fields: ${missing.join(", ")}`,
+          }),
+        );
+        return;
+      }
+
+      const input: WarmApplyInput = {
+        email: parsed.email as string,
+        name: parsed.name as string,
+        businessName: parsed.businessName as string,
+        websiteUrl: parsed.websiteUrl as string,
+        niche: parsed.niche as string,
+        services: parsed.services as string,
+        painPoint: parsed.painPoint as string,
+        leadVolume: parsed.leadVolume as string,
+        timeline: parsed.timeline as string,
+        tools: typeof parsed.tools === "string" ? parsed.tools : undefined,
+        contactId:
+          typeof parsed.contactId === "string" ? parsed.contactId : undefined,
+        applyId:
+          typeof parsed.applyId === "string" ? parsed.applyId : undefined,
+      };
+
+      // Respond 202 immediately. Dre takes 30-90s, far longer than any
+      // HTTP webhook caller wants to wait.
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "accepted",
+          agent: "warm_apply",
+          email: input.email,
+        }),
+      );
+
+      setImmediate(() => {
+        runWarmApply(input)
+          .then((result) => {
+            console.error(
+              `[webhook] warm_apply done agencyLeadId=${result.agencyLeadId} demoSiteUrl=${result.demoSiteUrl || "(missing)"} warnings=${JSON.stringify(result.warnings)}`,
+            );
+          })
+          .catch((err: any) => {
+            console.error(
+              `[webhook] warm_apply FAILED email=${input.email}:`,
               err?.message || err,
             );
           });
