@@ -3,14 +3,15 @@ import { getLeadById, updateLeadStatus } from "../lib/db.js";
 import { execDre } from "./pipeline.js";
 import { createCloseCheckoutSession } from "../lib/stripe.js";
 import { updateContactField } from "../lib/ac.js";
+import {
+  getQualificationProfile,
+  PROFILE_DEPOSIT_CENTS,
+  profileProductName,
+} from "../lib/profile.js";
 
 // Contact-level AC custom field that holds the close-asset demo URL so the
 // AC post-call close email can personalize with %CLOSE_DEMO_URL%.
 const CONTACT_FIELD_CLOSE_DEMO_URL = "171";
-
-// Default close price when the deal value isn't parsable from the webhook.
-// Matches flynerd-agency's outreach route dealValue (2026-04-18).
-const DEFAULT_CLOSE_PRICE_CENTS = 250_000;
 
 let _anthropic: Anthropic | null = null;
 
@@ -34,7 +35,8 @@ export interface KrisJennerInput {
   dealId: string;
   /**
    * AC deal value in dollars (optional). When present, overrides the
-   * default close price. When absent, DEFAULT_CLOSE_PRICE_CENTS is used.
+   * profile-default deposit amount. When absent, the amount is chosen
+   * from PROFILE_DEPOSIT_CENTS based on the lead's qualification profile.
    */
   dealValueDollars?: number;
 }
@@ -59,14 +61,18 @@ export interface KrisJennerResult {
  *
  * Flow:
  *   1. Supabase lookup by agency_lead_id (AC contact field 165).
- *   2. Rebuild the demo via Dre using the enriched intel we already have
+ *   2. Classify qualification profile from niche + intelData (matches
+ *      flynerd-agency/components/demo/nicheConfig.ts). Determines which
+ *      deposit amount and product name go to Stripe.
+ *   3. Rebuild the demo via Dre using the enriched intel we already have
  *      (same demo URL — Dre's getCanonicalDemoUrl(leadId) is deterministic).
- *   3. Restore lead status to what it was before Dre's write (Dre sets
+ *   4. Restore lead status to what it was before Dre's write (Dre sets
  *      status=DEMO_BUILT as a side effect, which is wrong for post-call).
- *   4. Create a real Stripe Checkout Session via inline price_data
- *      (no pre-existing Stripe Product required).
- *   5. Draft close email via Claude using real lead context.
- *   6. Write close_demo_url back to AC contact field 171 so AC's post-call
+ *   5. Create a real Stripe Checkout Session via inline price_data with
+ *      profile-specific amount + product name. AC deal value overrides
+ *      the profile default when explicitly set.
+ *   6. Draft close email via Claude using real lead context.
+ *   7. Write close_demo_url back to AC contact field 171 so AC's post-call
  *      email template can reference %CLOSE_DEMO_URL%.
  */
 export async function runKrisJennerClose(
@@ -98,7 +104,13 @@ export async function runKrisJennerClose(
       ? (intelData as any).rating
       : 0;
 
-  // 2. Rebuild demo via Dre (same URL — refreshes content with enriched data)
+  // 2. Classify qualification profile (drives deposit amount + product name)
+  const profile = getQualificationProfile({ niche, intelData });
+  console.error(
+    `[Kris Jenner] qualification profile: ${profile} (niche="${niche}")`,
+  );
+
+  // 3. Rebuild demo via Dre (same URL — refreshes content with enriched data)
   console.error(`[Kris Jenner] invoking Dre for leadId=${agencyLeadId}`);
   const dreResult = await execDre(
     agencyLeadId,
@@ -109,7 +121,7 @@ export async function runKrisJennerClose(
   );
   const closeDemoUrl: string = dreResult.demoSiteUrl;
 
-  // 3. Restore original status — execDre set status=DEMO_BUILT, which is
+  // 4. Restore original status — execDre set status=DEMO_BUILT, which is
   //    wrong for post-call context (prospect is past DEMO_BUILT).
   if (originalStatus && originalStatus !== "DEMO_BUILT") {
     try {
@@ -126,22 +138,24 @@ export async function runKrisJennerClose(
     }
   }
 
-  // 4. Real Stripe Checkout Session (inline price_data)
+  // 5. Real Stripe Checkout Session (inline price_data, profile-aware amount)
   let paymentLink = "";
   try {
+    const profileDefaultCents = PROFILE_DEPOSIT_CENTS[profile];
     const amountCents =
       typeof dealValueDollars === "number" && dealValueDollars > 0
         ? Math.round(dealValueDollars * 100)
-        : DEFAULT_CLOSE_PRICE_CENTS;
+        : profileDefaultCents;
     const session = await createCloseCheckoutSession({
       dealId,
       agencyLeadId,
       businessName,
       amountCents,
+      productName: profileProductName(profile, businessName),
     });
     paymentLink = session.url;
     console.error(
-      `[Kris Jenner] stripe session created id=${session.sessionId} amountCents=${amountCents}`,
+      `[Kris Jenner] stripe session created id=${session.sessionId} profile=${profile} amountCents=${amountCents} (profileDefault=${profileDefaultCents})`,
     );
   } catch (err: any) {
     console.error("[Kris Jenner] stripe session creation failed:", err?.message || err);
@@ -149,7 +163,7 @@ export async function runKrisJennerClose(
     paymentLink = "";
   }
 
-  // 5. Draft close email via Claude
+  // 6. Draft close email via Claude
   const painPoints = Array.isArray((intelData as any).painPoints)
     ? ((intelData as any).painPoints as string[])
     : [];
@@ -188,7 +202,7 @@ Write the exact email body to send. Requirements:
       ? completion.content[0].text.trim()
       : "";
 
-  // 6. AC writeback — close_demo_url to contact field 171
+  // 7. AC writeback — close_demo_url to contact field 171
   try {
     await updateContactField(contactId, CONTACT_FIELD_CLOSE_DEMO_URL, closeDemoUrl);
     console.error(

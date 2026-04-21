@@ -130,7 +130,7 @@ User corrects you → update `docs/lessons.md` with the pattern and a rule that 
 | Dre          | IMPLEMENTED                      | `src/index.ts` ~L161     | Codex V2 hardened (z.any() inputs, defensive parsing)                                     |
 | Hov          | STUB                             | `src/index.ts` ~L287     | Must use AC tag-trigger flow, not direct send                                             |
 | Tyrion       | STUB                             | `src/index.ts` ~L332     | Per-lead error isolation required                                                         |
-| Kris Jenner  | IMPLEMENTED (2026-04-18)         | `src/agents/kris.ts`     | Real Supabase lookup + Dre rebuild + Stripe Checkout Session + Claude email + AC writeback to field 171. Triggered by POST /webhooks/ac/call-completed. |
+| Kris Jenner  | IMPLEMENTED (2026-04-20)         | `src/agents/kris.ts`     | Supabase lookup + Dre rebuild + profile-aware Stripe Checkout Session + Claude email + AC writeback to field 171. Profile classifier at `src/lib/profile.ts`: underserved_local defaults to $750 deposit (UL Quickstart), tech_enabled_premium to $1,750 (TP Concierge). AC `dealValueDollars` still overrides. Triggered by POST /webhooks/ac/call-completed. |
 | Cersei       | STUB                             | `src/index.ts` ~L319     | Hourly sweep, sets `DEMO_EXPIRED` (NOT `EXPIRED`)                                         |
 | Tiny Harris  | STUB                             | `src/index.ts` ~L304     | Queries `"Client"` table, NOT `"AgencyLead"`                                              |
 | Kendrick     | STUB                             | `src/agents/kendrick.ts` | SEO/AEO execution                                                                         |

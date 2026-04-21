@@ -120,3 +120,28 @@
 ---
 
 ---
+### 2026-04-20 — Kris Jenner profile-aware deposits
+
+**Repo:** sonata-stack
+
+**Files changed:**
+- `src/lib/profile.ts` — NEW. `QualificationProfile` type, `getQualificationProfile(lead)` classifier (mirrors `flynerd-agency/components/demo/nicheConfig.ts` MEDSPA_KEYWORDS), `PROFILE_DEPOSIT_CENTS` map, `profileProductName()` helper.
+- `src/agents/kris.ts` — classifies profile after Supabase lookup, picks deposit amount from PROFILE_DEPOSIT_CENTS, passes profile-specific productName to Stripe. AC `dealValueDollars` still overrides when explicitly set.
+- `CLAUDE.md` — updated Kris agent status row with new behavior.
+
+**Decisions made:**
+- Profile classifier ported (not imported) into sonata-stack. Two reasons: (1) flynerd-agency is a Next.js project and sonata-stack is a Node server — no shared import path without extra tooling. (2) Ports are safer across MCP tool boundaries than runtime imports. Tradeoff: the MEDSPA_KEYWORDS list must stay in sync between both repos. Documented with a clear `// Keep in sync with ...` comment in profile.ts.
+- Default deposit amounts match the 2026-04-20 live catalog 50% deposits: $750 UL / $1,750 TP. If the catalog ever moves off 50/50 splits, update PROFILE_DEPOSIT_CENTS AND the catalog at the same time.
+- Did NOT switch Kris to Payment Links keyed by lookup_key (option D2 in the original plan). Kept Checkout Sessions with inline price_data (option D1) because: (1) per-deal Stripe metadata is cleaner with Checkout Sessions, (2) one less AC deploy blocker, (3) we can migrate to Payment Links later if we want to deprecate the script route.
+- `productName` on the Stripe checkout page now reads "FlyNerd AI Website Quickstart - {businessName}" or "FlyNerd AI Website Concierge - {businessName}" depending on profile, replacing the generic "FlyNerd Build Package - {businessName}".
+
+**Verification:**
+- `npm run build` passed.
+- `grep -c` on dist/ confirms profile.ts compiled (3 refs) and kris.ts references (4 refs, imports + call sites).
+
+**Notes / pending:**
+- AC automation "FlyNerd — Call Completed Post-Call Close" is still DRAFT. Activation still blocked on Railway env deploy + smoke test.
+- If Jovel/any client signs up under a custom deal value, AC must set the deal value on the close deal before the webhook fires so `dealValueDollars` override kicks in. Otherwise Kris uses the profile default, which may differ from a negotiated rate.
+- flynerd-agency's profile classifier at `components/demo/nicheConfig.ts` must stay in sync — consider extracting to a shared package if we ever add a third agent that classifies.
+
+---
