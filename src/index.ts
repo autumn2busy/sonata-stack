@@ -13,6 +13,11 @@ import { classifyWebPresence, isQualifiedLead } from "./lib/qualification.js";
 import { runKendrickAudit } from "./agents/kendrick.js";
 import { runTinyHarrisReport } from "./agents/tiny.js";
 import { runKrisJennerClose } from "./agents/kris.js";
+import {
+  ensureWarmLead,
+  continueWarmApplyBuild,
+  type WarmApplyInput,
+} from "./agents/warmApply.js";
 import { execSimonCowell, execYonce, execDre, execHovOutreach } from "./agents/pipeline.js";
 
 let _anthropic: Anthropic | null = null;
@@ -471,6 +476,209 @@ app.delete("/mcp", async (req, res) => {
   }
   await transports.get(sessionId)!.handleRequest(req, res);
 });
+
+// ─────────────────────────────────────────────
+// WEBHOOK ROUTES (moved from old src/webhook.ts which was never mounted)
+//
+// Both routes share the same x-webhook-secret auth. Body parsers are
+// scoped to these two routes only so the /mcp transport still reads
+// its raw body directly.
+// ─────────────────────────────────────────────
+
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
+
+function verifyWebhookSecret(req: express.Request, res: express.Response): boolean {
+  if (!WEBHOOK_SECRET) {
+    console.error("[webhook] WEBHOOK_SECRET env var not set — refusing request");
+    res.status(500).json({ error: "Webhook secret not configured on server" });
+    return false;
+  }
+  const token = req.headers["x-webhook-secret"];
+  if (token !== WEBHOOK_SECRET) {
+    console.error("[webhook] rejected: bad or missing x-webhook-secret");
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+function readField(
+  bag: Record<string, unknown>,
+  ...candidates: string[]
+): string | undefined {
+  for (const key of candidates) {
+    const v = bag[key];
+    if (typeof v === "string" && v.length > 0) return v;
+    if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string" && v[0].length > 0) {
+      return v[0];
+    }
+  }
+  return undefined;
+}
+
+// AC fires this when the CALL_COMPLETED tag is applied (from automation 502
+// after MEETING_ENDED). Body is form-encoded (application/x-www-form-urlencoded);
+// deal context arrives in URL query params.
+app.post(
+  "/webhooks/ac/call-completed",
+  express.urlencoded({ extended: false, limit: "1mb" }),
+  async (req, res) => {
+    if (!verifyWebhookSecret(req, res)) return;
+
+    const qp = req.query as Record<string, string | string[] | undefined>;
+    const dealId = typeof qp.dealfield1 === "string" ? qp.dealfield1 : "";
+    const dealTitle = typeof qp.dealfield2 === "string" ? qp.dealfield2 : undefined;
+    const dealValueStr = typeof qp.dealfield3 === "string" ? qp.dealfield3 : "";
+    const dealStage = typeof qp.dealfield4 === "string" ? qp.dealfield4 : undefined;
+    const dealPipeline = typeof qp.dealfield5 === "string" ? qp.dealfield5 : undefined;
+
+    let dealValueDollars: number | undefined;
+    if (dealValueStr) {
+      const parsed = Number(dealValueStr.replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(parsed) && parsed > 0) dealValueDollars = parsed;
+    }
+
+    const bodyParsed = (req.body ?? {}) as Record<string, unknown>;
+    const contactId =
+      readField(bodyParsed, "contact[id]", "contact_id", "contactId", "id") || "";
+    const agencyLeadId =
+      readField(
+        bodyParsed,
+        "contact[fields][165]",
+        "contact_field_165",
+        "agency_lead_id",
+        "agencyLeadId",
+      ) || "";
+
+    if (!contactId || !agencyLeadId || !dealId) {
+      const preview = JSON.stringify(bodyParsed).slice(0, 400);
+      console.error(
+        `[webhook] call-completed missing required field(s): contactId=${!!contactId} agencyLeadId=${!!agencyLeadId} dealId=${!!dealId}. bodyPreview=${preview}`,
+      );
+      res.status(400).json({
+        error: "missing contactId / agencyLeadId / dealId",
+      });
+      return;
+    }
+
+    res.status(202).json({
+      status: "accepted",
+      agent: "kris_jenner",
+      agencyLeadId,
+      dealId,
+      dealTitle,
+      dealStage,
+      dealPipeline,
+    });
+
+    setImmediate(() => {
+      runKrisJennerClose({ agencyLeadId, contactId, dealId, dealValueDollars })
+        .then((result) => {
+          console.error(
+            `[webhook] kris_jenner done agencyLeadId=${agencyLeadId} warnings=${JSON.stringify(result.warnings)}`,
+          );
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[webhook] kris_jenner FAILED agencyLeadId=${agencyLeadId}: ${msg}`,
+          );
+        });
+    });
+  },
+);
+
+// flynerd-agency /api/apply fires this when a prospect completes the
+// qualification form. JSON body. Phase 1 (Supabase insert) runs
+// synchronously; Phase 2 (Dre build) runs in setImmediate.
+app.post(
+  "/webhooks/warm-apply",
+  express.json({ limit: "1mb" }),
+  async (req, res) => {
+    if (!verifyWebhookSecret(req, res)) return;
+
+    const parsed = (req.body ?? {}) as Partial<WarmApplyInput>;
+    const required: Array<keyof WarmApplyInput> = [
+      "email",
+      "name",
+      "businessName",
+      "websiteUrl",
+      "niche",
+      "services",
+      "painPoint",
+      "leadVolume",
+      "timeline",
+    ];
+    const missing = required.filter((k) => {
+      const v = parsed[k];
+      return typeof v !== "string" || v.trim() === "";
+    });
+    if (missing.length > 0) {
+      console.error(
+        `[webhook] warm-apply missing required fields: ${missing.join(", ")}`,
+      );
+      res.status(400).json({
+        error: `Missing required fields: ${missing.join(", ")}`,
+      });
+      return;
+    }
+
+    const input: WarmApplyInput = {
+      email: parsed.email as string,
+      name: parsed.name as string,
+      businessName: parsed.businessName as string,
+      websiteUrl: parsed.websiteUrl as string,
+      niche: parsed.niche as string,
+      services: parsed.services as string,
+      painPoint: parsed.painPoint as string,
+      leadVolume: parsed.leadVolume as string,
+      timeline: parsed.timeline as string,
+      tools: typeof parsed.tools === "string" ? parsed.tools : undefined,
+      contactId:
+        typeof parsed.contactId === "string" ? parsed.contactId : undefined,
+      applyId:
+        typeof parsed.applyId === "string" ? parsed.applyId : undefined,
+    };
+
+    // Phase 1 — synchronous Supabase insert
+    let ensured: Awaited<ReturnType<typeof ensureWarmLead>>;
+    try {
+      ensured = await ensureWarmLead(input);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[webhook] warm-apply ensureWarmLead failed email=${input.email}: ${msg}`,
+      );
+      res.status(500).json({
+        error: "Failed to create AgencyLead row in Supabase",
+        detail: msg,
+      });
+      return;
+    }
+
+    res.status(202).json({
+      status: "accepted",
+      agent: "warm_apply",
+      email: input.email,
+      agencyLeadId: ensured.agencyLeadId,
+    });
+
+    setImmediate(() => {
+      continueWarmApplyBuild(ensured.agencyLeadId, input)
+        .then((result) => {
+          console.error(
+            `[webhook] warm_apply done agencyLeadId=${result.agencyLeadId} demoSiteUrl=${result.demoSiteUrl || "(missing)"} warnings=${JSON.stringify(result.warnings)}`,
+          );
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[webhook] warm_apply FAILED agencyLeadId=${ensured.agencyLeadId} email=${input.email}: ${msg}`,
+          );
+        });
+    });
+  },
+);
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
