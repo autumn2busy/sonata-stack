@@ -191,12 +191,14 @@ export async function execDre(leadId: string, businessName: string, niche: strin
   await updateLeadAsBuilt(leadId, { demoSiteUrl, validUntil, intelData: intelDataForTemplate });
   const deployed = await triggerDeploy();
 
-  const videoScript = buildVideoScript({
+  const videoScript = await buildVideoScript({
     businessName,
     niche,
     rating,
     painPoints,
     operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
+    isWarmLead: payload.leadSource === "warm_apply",
+    scoutServices: typeof payload.services === "string" ? payload.services : undefined,
   });
 
   generateAvatarVideo(videoScript, businessName)

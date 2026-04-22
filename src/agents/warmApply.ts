@@ -140,6 +140,7 @@ export async function continueWarmApplyBuild(
     timeline: input.timeline,
     tools: input.tools ?? "",
     qualificationProfile: inferQualificationProfileFromNiche(input.niche),
+    leadSource: "warm_apply",
   };
 
   try {
@@ -228,6 +229,8 @@ function inferQualificationProfileFromNiche(
     "law",
     "dental",
     "concierge",
+    "saas",
+    "digital",
   ];
   return premiumKeywords.some((k) => lower.includes(k))
     ? "tech_enabled_premium"
