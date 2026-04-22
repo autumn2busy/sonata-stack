@@ -2,7 +2,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL as NodeURL } from "node:url";
 import querystring from "node:querystring";
 import { runKrisJennerClose } from "./agents/kris.js";
-import { runWarmApply, type WarmApplyInput } from "./agents/warmApply.js";
+import {
+  ensureWarmLead,
+  continueWarmApplyBuild,
+  type WarmApplyInput,
+} from "./agents/warmApply.js";
 
 const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || "3100", 10);
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
@@ -278,19 +282,45 @@ export function startWebhookServer() {
           typeof parsed.applyId === "string" ? parsed.applyId : undefined,
       };
 
-      // Respond 202 immediately. Dre takes 30-90s, far longer than any
-      // HTTP webhook caller wants to wait.
+      // Phase 1 (synchronous) — insert the AgencyLead row FIRST so
+      // flynerd-agency gets the agencyLeadId back in the 202 body before
+      // it applies the DEMO_QUALIFIED tag. n8n's tag-sync workflow fires
+      // on that tag and looks up Supabase; if the row isn't there yet,
+      // it falls back to the orphan list. Inserting synchronously closes
+      // that race. insertLead is ~200-500ms under normal conditions.
+      let ensured: Awaited<ReturnType<typeof ensureWarmLead>>;
+      try {
+        ensured = await ensureWarmLead(input);
+      } catch (err: any) {
+        console.error(
+          `[webhook] warm-apply ensureWarmLead failed email=${input.email}:`,
+          err?.message || err,
+        );
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: "Failed to create AgencyLead row in Supabase",
+            detail: err?.message ?? String(err),
+          }),
+        );
+        return;
+      }
+
+      // Respond 202 with the agencyLeadId so the caller can stamp it on
+      // AC contact field 165 before any tag-triggered automations fire.
       res.writeHead(202, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           status: "accepted",
           agent: "warm_apply",
           email: input.email,
+          agencyLeadId: ensured.agencyLeadId,
         }),
       );
 
+      // Phase 2 (async) — Dre build + AC field 168 writeback. 30-90s.
       setImmediate(() => {
-        runWarmApply(input)
+        continueWarmApplyBuild(ensured.agencyLeadId, input)
           .then((result) => {
             console.error(
               `[webhook] warm_apply done agencyLeadId=${result.agencyLeadId} demoSiteUrl=${result.demoSiteUrl || "(missing)"} warnings=${JSON.stringify(result.warnings)}`,
@@ -298,7 +328,7 @@ export function startWebhookServer() {
           })
           .catch((err: any) => {
             console.error(
-              `[webhook] warm_apply FAILED email=${input.email}:`,
+              `[webhook] warm_apply FAILED agencyLeadId=${ensured.agencyLeadId} email=${input.email}:`,
               err?.message || err,
             );
           });

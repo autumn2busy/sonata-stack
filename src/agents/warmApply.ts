@@ -50,41 +50,33 @@ export interface WarmApplyResult {
 }
 
 /**
- * Warm-lead demo build pipeline.
- *
- * Runs when a prospect completes the /apply qualification form on
- * flynerd-agency. Unlike the cold-outreach pipeline (Simon scout →
- * Yoncé enrich → Dre build), warm leads arrive with their URL + rich
- * form data, so we skip scouting + enrichment and go straight to Dre.
- *
- * The form answers stand in for Yoncé's output: `services` becomes the
- * reputation summary hook, `painPoint` becomes the first painPoint entry,
- * `niche` drives template routing. Dre's demo builder doesn't require a
- * Yelp rating, so 0 is fine.
- *
- * Flow:
- *   1. Insert AgencyLead row with status=AUDITED (skipping DISCOVERED
- *      because scouting is irrelevant — we have the URL).
- *   2. Populate intelData derived from form answers.
- *   3. Call execDre to build the personalized demo.
- *   4. Write the demo URL back to AC contact field 168 (%DEMOURL%) so
- *      AC email templates can reference it during the pre-call sequence.
- *   5. Return the agencyLeadId + demoSiteUrl for observability.
- *
- * Dispatched from flynerd-agency via POST /webhooks/warm-apply.
+ * Result of the synchronous first phase. Returned to flynerd-agency
+ * in the webhook's 202 body so flynerd-agency can write the
+ * agency_lead_id to AC contact field 165 before applying the
+ * DEMO_QUALIFIED tag. n8n's tag-sync workflow needs both to resolve.
  */
-export async function runWarmApply(
-  input: WarmApplyInput,
-): Promise<WarmApplyResult> {
-  const warnings: string[] = [];
+export interface EnsureWarmLeadResult {
+  agencyLeadId: string;
+  businessName: string;
+  niche: string;
+}
 
+/**
+ * Phase 1 — synchronous Supabase insert. Fast (~200-500ms).
+ *
+ * Called by /webhooks/warm-apply BEFORE returning 202 so flynerd-agency
+ * has the agencyLeadId in hand before it applies the DEMO_QUALIFIED tag.
+ * This closes the race where n8n's tag-sync workflow would fire, look
+ * up the Supabase row by agency_lead_id, not find it (because insert
+ * hadn't landed yet), and fall back to the orphan list.
+ */
+export async function ensureWarmLead(
+  input: WarmApplyInput,
+): Promise<EnsureWarmLeadResult> {
   console.error(
-    `[warm-apply] start email=${input.email} businessName="${input.businessName}" url=${input.websiteUrl}`,
+    `[warm-apply] ensure start email=${input.email} businessName="${input.businessName}"`,
   );
 
-  // 1. Create AgencyLead row — status AUDITED since we're skipping
-  //    Simon/Yoncé. The scoutData captures the full form snapshot for
-  //    audit and future retraining.
   const lead = await insertLead({
     businessName: input.businessName,
     niche: input.niche,
@@ -104,14 +96,36 @@ export async function runWarmApply(
     status: "AUDITED",
   });
 
-  const agencyLeadId = lead.id;
   console.error(
-    `[warm-apply] created AgencyLead id=${agencyLeadId} for email=${input.email}`,
+    `[warm-apply] ensure done agencyLeadId=${lead.id} email=${input.email}`,
   );
 
-  // 2. Build synthetic intelData from form answers. Dre reads painPoints,
-  //    reputationSummary, and a few other fields — we map form answers
-  //    onto the same shape Yoncé would normally produce.
+  return {
+    agencyLeadId: lead.id,
+    businessName: lead.businessName,
+    niche: lead.niche,
+  };
+}
+
+/**
+ * Phase 2 — async Dre build + AC field 168 writeback. Slow (30-90s).
+ *
+ * Called in setImmediate after the webhook returns 202. Assumes the
+ * AgencyLead row was created by ensureWarmLead. Populates intelData
+ * via updateLeadAsAudited, fires Dre, writes the resulting demo URL
+ * back to AC so the pre-call email template's %DEMOURL% button
+ * resolves.
+ */
+export async function continueWarmApplyBuild(
+  agencyLeadId: string,
+  input: WarmApplyInput,
+): Promise<WarmApplyResult> {
+  const warnings: string[] = [];
+
+  console.error(
+    `[warm-apply] build start agencyLeadId=${agencyLeadId} url=${input.websiteUrl}`,
+  );
+
   const intelData = {
     rating: 0,
     reviewCount: 0,
@@ -120,7 +134,6 @@ export async function runWarmApply(
     reputationSummary: `${input.businessName} offers ${input.services}. Target: ${input.niche}.`,
     operatingContext: `Inquiry volume: ${input.leadVolume}. Launch timeline: ${input.timeline}.${input.tools ? ` Current stack: ${input.tools}.` : ""}`,
     opportunityScore: 50,
-    // Form-specific fields we keep for later context (Dre ignores unknown keys)
     sourceUrl: input.websiteUrl,
     services: input.services,
     leadVolume: input.leadVolume,
@@ -139,14 +152,13 @@ export async function runWarmApply(
     warnings.push("audit_update_failed");
   }
 
-  // 3. Fire Dre. Output includes demoSiteUrl (deterministic per leadId).
   let demoSiteUrl = "";
   try {
     const dreResult = await execDre(
       agencyLeadId,
       input.businessName,
       input.niche,
-      0, // rating — no review data yet for warm leads
+      0,
       intelData,
     );
     demoSiteUrl = dreResult.demoSiteUrl;
@@ -156,8 +168,6 @@ export async function runWarmApply(
   } catch (err: any) {
     console.error("[warm-apply] Dre build failed:", err?.message || err);
     warnings.push("dre_failed");
-    // Attempt to restore a reasonable status so the lead isn't stuck at AUDITED
-    // with no demo. Don't block the response if this also fails.
     try {
       await updateLeadStatus(agencyLeadId, "AUDITED");
     } catch {
@@ -165,7 +175,6 @@ export async function runWarmApply(
     }
   }
 
-  // 4. AC writeback — %DEMOURL% to contact field 168.
   if (demoSiteUrl && input.contactId) {
     try {
       await updateContactField(
@@ -177,23 +186,17 @@ export async function runWarmApply(
         `[warm-apply] wrote %DEMOURL% to AC contact field ${CONTACT_FIELD_DEMOURL} for contactId=${input.contactId}`,
       );
     } catch (err: any) {
-      console.error(
-        `[warm-apply] AC writeback failed:`,
-        err?.message || err,
-      );
+      console.error("[warm-apply] AC writeback failed:", err?.message || err);
       warnings.push("ac_writeback_failed");
     }
   } else if (!demoSiteUrl) {
     warnings.push("ac_writeback_skipped_no_demo");
   } else if (!input.contactId) {
-    console.error(
-      "[warm-apply] no contactId provided, skipping AC writeback (demo built but not linked to AC)",
-    );
     warnings.push("ac_writeback_skipped_no_contact_id");
   }
 
   console.error(
-    `[warm-apply] done agencyLeadId=${agencyLeadId} demoSiteUrl=${demoSiteUrl || "(missing)"} warnings=${JSON.stringify(warnings)}`,
+    `[warm-apply] build done agencyLeadId=${agencyLeadId} demoSiteUrl=${demoSiteUrl || "(missing)"} warnings=${JSON.stringify(warnings)}`,
   );
 
   return { agencyLeadId, demoSiteUrl, warnings };
