@@ -212,6 +212,11 @@ function inferQualificationProfileFromNiche(
   niche: string,
 ): "underserved_local" | "tech_enabled_premium" {
   const lower = niche.toLowerCase();
+  // Only niches whose template (MedspaExperience) visually matches. SaaS,
+  // digital, solar, legal, and similar premium non-medspa niches are better
+  // served by Profile 1 (DemoExperience + SitePreview), which is fully
+  // AI-driven and adapts to any business. Keeping this list narrow prevents
+  // a SaaS lead landing on a page that talks about Botox and HydraFacial.
   const premiumKeywords = [
     "medspa",
     "med spa",
@@ -224,13 +229,7 @@ function inferQualificationProfileFromNiche(
     "beauty",
     "cosmetic",
     "facial",
-    "solar",
-    "legal",
-    "law",
     "dental",
-    "concierge",
-    "saas",
-    "digital",
   ];
   return premiumKeywords.some((k) => lower.includes(k))
     ? "tech_enabled_premium"
