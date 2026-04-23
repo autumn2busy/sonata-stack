@@ -135,22 +135,32 @@ export async function buildVideoScript(params: {
     operatingContext: string;
     isWarmLead?: boolean;
     scoutServices?: string;
+    websiteUrl?: string;
 }): Promise<string> {
-    const { businessName, niche, rating, painPoints, operatingContext, isWarmLead, scoutServices } = params;
+    const { businessName, niche, rating, painPoints, operatingContext, isWarmLead, scoutServices, websiteUrl } = params;
 
     let rawScript: string;
 
     if (isWarmLead) {
+        const cleanDomain = websiteUrl
+            ? websiteUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "").split("/")[0]
+            : "";
+
+        const siteLine = cleanDomain
+            ? `Your current site at ${cleanDomain} is working, but I think we can do a lot more with it.`
+            : `I reviewed what you have online today and I think we can do a lot more with it.`;
+
         const painLine = painPoints.length > 0
-            ? `You mentioned ${painPoints[0].toLowerCase()} is costing you revenue right now — we built this demo specifically around solving that.`
-            : `We built this demo around the challenges you described in your application.`;
+            ? `You told us ${painPoints[0].toLowerCase()} is costing you revenue right now, and I built this demo specifically around solving that.`
+            : `I built this demo around the challenges you described in your application.`;
 
         const servicesLine = scoutServices
-            ? `Based on your services — ${scoutServices.split(/[,\n]/)[0].trim()} and more — here's what your new site would look like.`
-            : `Based on what you shared about your business, here's what your new site would look like.`;
+            ? `Using your actual services and target market, I put together a conversion-focused version of your site from the ground up.`
+            : `Using what you shared about your business, I put together a conversion-focused version of your site from the ground up.`;
 
         rawScript = [
-            `Hey ${businessName}, I saw your application come through and I wanted to personally walk you through what we put together for you.`,
+            `Hey ${businessName}, I saw your application come through and I wanted to personally walk you through what I put together for you.`,
+            siteLine,
             painLine,
             servicesLine,
             `Scroll down to see a preview of what your new site could look like. If you're ready to move forward, click the button below to lock in your build slot.`,

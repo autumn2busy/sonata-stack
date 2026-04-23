@@ -4,6 +4,7 @@ import { updateLeadAsAudited, updateLeadAsBuilt, insertLead, updateLeadStatus } 
 import { getCanonicalDemoUrl, triggerDeploy } from "../lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "../lib/heygen.js";
 import { classifyWebPresence, isQualifiedLead } from "../lib/qualification.js";
+import { generateDemoCopy } from "../lib/demoCopy.js";
 
 // We need a helper to get Anthropic since it's used by yonce
 let _anthropic: Anthropic | null = null;
@@ -196,6 +197,26 @@ export async function execDre(leadId: string, businessName: string, niche: strin
     intelDataForTemplate.services = payload.services;
   }
 
+  // AI-generated demo copy (cached per-lead in intelData). Fall back silently
+  // to literal substitution if Claude fails — the page has template defaults.
+  try {
+    const copy = await generateDemoCopy({
+      businessName,
+      niche,
+      scoutServices: typeof payload.services === "string" ? payload.services : undefined,
+      painPoint: painPoints[0],
+      websiteUrl: typeof payload.sourceUrl === "string" ? payload.sourceUrl : undefined,
+    });
+    intelDataForTemplate.heroHook = copy.heroHook;
+    intelDataForTemplate.heroSubline = copy.heroSubline;
+    intelDataForTemplate.noticedLine = copy.noticedLine;
+    intelDataForTemplate.tagline = copy.tagline;
+    intelDataForTemplate.serviceCards = copy.serviceCards;
+    console.error(`[Dre] generated demo copy for ${businessName}`);
+  } catch (err: any) {
+    console.error("[Dre] demo copy generation failed (non-blocking):", err?.message || err);
+  }
+
   const demoSiteUrl = getCanonicalDemoUrl(leadId);
   const validUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -210,6 +231,7 @@ export async function execDre(leadId: string, businessName: string, niche: strin
     operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
     isWarmLead: payload.leadSource === "warm_apply",
     scoutServices: typeof payload.services === "string" ? payload.services : undefined,
+    websiteUrl: typeof payload.sourceUrl === "string" ? payload.sourceUrl : undefined,
   });
 
   generateAvatarVideo(videoScript, businessName)
