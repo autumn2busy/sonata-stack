@@ -32,7 +32,15 @@ export async function execSimonCowell(niche: string, city: string) {
     body: JSON.stringify({ textQuery: query, languageCode: "en" })
   });
 
-  if (!placesRes.ok) throw new Error(`Google Places API Error: ${placesRes.statusText}`);
+  if (!placesRes.ok) {
+    const body = await placesRes.text().catch(() => "<no body>");
+    console.error(
+      `[Simon] Places API error status=${placesRes.status} statusText=${placesRes.statusText} body=${body.slice(0, 500)}`,
+    );
+    throw new Error(
+      `Google Places API Error: ${placesRes.status} ${placesRes.statusText} — ${body.slice(0, 200)}`,
+    );
+  }
 
   const data = await placesRes.json() as any;
   const places = data.places || [];
