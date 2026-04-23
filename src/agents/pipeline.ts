@@ -171,7 +171,7 @@ export async function execDre(leadId: string, businessName: string, niche: strin
   const brandPalettes = Array.isArray(payload.brandPalettes) ? payload.brandPalettes : [];
   const selectedPalette = payload.selectedPalette ?? brandPalettes[0] ?? null;
 
-  const intelDataForTemplate = {
+  const intelDataForTemplate: Record<string, unknown> = {
     painPoints,
     socialProofPoints,
     operatingContext: typeof payload.operatingContext === "string" ? payload.operatingContext : "",
@@ -184,6 +184,17 @@ export async function execDre(leadId: string, businessName: string, niche: strin
     },
     rating: rating,
   };
+  // Preserve warm-apply fields that the demo page and video script depend on.
+  // Without this, updateLeadAsBuilt overwrites intelData and loses them.
+  if (typeof payload.qualificationProfile === "string") {
+    intelDataForTemplate.qualificationProfile = payload.qualificationProfile;
+  }
+  if (typeof payload.leadSource === "string") {
+    intelDataForTemplate.leadSource = payload.leadSource;
+  }
+  if (typeof payload.services === "string") {
+    intelDataForTemplate.services = payload.services;
+  }
 
   const demoSiteUrl = getCanonicalDemoUrl(leadId);
   const validUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
