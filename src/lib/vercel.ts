@@ -2,8 +2,9 @@
 // Handles demo site deployment and password protection.
 
 const TEAM_ID = "team_uSLsRZHA5u8JAkI9tVVipAFi";
-const TARGET_PROJECT = "flynerd-demo-lead";
-const FALLBACK_BASE_URL = "https://flynerd-demo-lead.vercel.app";
+const TARGET_PROJECT = process.env.VERCEL_TARGET_PROJECT ?? "flynerd-demo-lead";
+const FALLBACK_BASE_URL =
+    process.env.VERCEL_FALLBACK_BASE_URL ?? "https://flynerd-demo-lead.vercel.app";
 
 function getToken(): string {
     const token = process.env.VERCEL_API_TOKEN;
