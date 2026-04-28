@@ -65,7 +65,7 @@
 
 - The outreach tag is `FLYNERD_OUTREACH_PENDING` (NOT `outreach_ready`). This tag triggers the AC automation that delivers the email.
 - AC API URL format: `https://youraccountname.api-us1.com`
-- Each workspace subfolder (`flynerd-agency`, `flynerdtech`, `sonata-stack`, `raidsecuritycorp`) has its own `.env` — they may point to different AC accounts.
+- Each active workspace subfolder (`flynerd-agency`, `sonata-stack`, `raidsecuritycorp`) has its own `.env` — they may point to different AC accounts.
 - **Infrastructure as Code:** AC pipelines and custom fields are created via `create-ac-pipeline.mjs` and `create-deal-fields.mjs`. Run before testing any AC-touching agent.
 - **Pipeline IDs are hardcoded** in `flynerd_agency/api/contact/route.ts` (pipeline 3, stage 8). They drift from `create-ac-pipeline.mjs`. Verify before assuming.
 - **n8n** handles complex multi-stage workflows tied to AC. The tag-sync workflow is `d42cyp27QDIqZczu`.
