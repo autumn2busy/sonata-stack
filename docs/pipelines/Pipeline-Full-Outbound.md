@@ -69,7 +69,7 @@ Simon Cowell → Yoncé → Dre → Hov
 - Supabase — write demo URL and video URL
 
 **Outputs:**
-- UPDATE `"AgencyLead"` → status `BUILT`, `demoSiteUrl`, `walkthroughVideoUrl`, `validUntil`
+- UPDATE `"AgencyLead"` → status `DEMO_BUILT`, `demoSiteUrl`, `walkthroughVideoUrl`, `validUntil`
 - Returns JSON: `{ demoUrl, videoStatus, validUntil, deployTriggered, brandColors }`
 
 **Key Details:**
@@ -85,7 +85,7 @@ Simon Cowell → Yoncé → Dre → Hov
 **Purpose:** Generate personalized outreach, inject into AC, trigger email delivery via automation.
 **MCP Tool:** `hov({ leadId, contactEmail, context })`
 **Inputs:**
-- `leadId` — must have status BUILT
+- `leadId` — must have status DEMO_BUILT
 - `contactEmail` — from Hunter.io enrichment or manual entry
 - `context` — e.g. "initial outreach" or prospect reply content
 
@@ -99,7 +99,7 @@ Simon Cowell → Yoncé → Dre → Hov
 3. Pushes AI copy into AC custom field (synced through `ac-sync-logic.ts`)
 4. Tags contact with `FLYNERD_OUTREACH_PENDING`
 5. AC native automation picks up the tag and delivers the email (preserves deliverability, IP reputation, tracking)
-6. Updates `"AgencyLead"` → status `OUTREACHED`, `lastInteraction`, `outreachHistory`
+6. Updates `"AgencyLead"` → status `OUTREACH_SENT`, `lastInteraction`, `outreachHistory`
 
 **Why not send via API?** AC's standard API is optimized for marketing automation, not 1:1 transactional cold emails. Tag-triggered delivery preserves sender reputation and gives you native open/click tracking.
 
@@ -164,7 +164,7 @@ Simon Cowell → Yoncé → Dre → Hov
 
 ## Lead → Client Conversion
 
-When a lead reaches status `WON` (or a client is onboarded outside the pipeline):
+When a lead reaches status `CLOSED_WON` (or a client is onboarded outside the pipeline):
 
 ```
 1. Create row in "Client" table with:
@@ -174,7 +174,7 @@ When a lead reaches status `WON` (or a client is onboarded outside the pipeline)
    - previousPlatform (e.g., "wix")
 
 2. Update AgencyLead row:
-   - status: "WON"
+   - status: "CLOSED_WON"
 
 3. Create Vercel project for client (separate from flynerd-demo-lead)
 

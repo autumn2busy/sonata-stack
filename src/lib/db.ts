@@ -3,6 +3,7 @@
 // DB writes simply fail gracefully (yonce gates on leadId being present).
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
+import { AGENCY_LEAD_STATUSES, type AgencyLeadStatus } from "./status-contract.js";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -96,6 +97,14 @@ export async function insertLead(payload: {
   status?: string;
 }) {
   const supabase = getSupabase();
+  const incomingStatus = payload.status ?? "DISCOVERED";
+  if (!AGENCY_LEAD_STATUSES.includes(incomingStatus as AgencyLeadStatus)) {
+    throw new Error(
+      `Invalid AgencyLead status: ${incomingStatus}. Must be one of: ${AGENCY_LEAD_STATUSES.join(", ")}`
+    );
+  }
+  const status: AgencyLeadStatus = incomingStatus as AgencyLeadStatus;
+
   const { data, error } = await supabase
     .from("AgencyLead")
     .upsert({
@@ -107,7 +116,7 @@ export async function insertLead(payload: {
       contactPhone: payload.contactPhone,
       placeId: payload.placeId,
       scoutData: payload.scoutData,
-      status: payload.status || "DISCOVERED",
+      status,
       updatedAt: new Date().toISOString(),
     }, { onConflict: "placeId" })
     .select()
@@ -132,7 +141,7 @@ export async function getExpiredLeads() {
   return data;
 }
 
-export async function updateLeadStatus(leadId: string, status: string) {
+export async function updateLeadStatus(leadId: string, status: AgencyLeadStatus) {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("AgencyLead")

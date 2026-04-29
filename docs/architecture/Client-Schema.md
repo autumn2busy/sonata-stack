@@ -10,16 +10,16 @@
 AgencyLead (pipeline)                    Client (retained)
   status: DISCOVERED                       ┌──────────────┐
   status: AUDITED                          │  Client row  │
-  status: BUILT                            │  created     │
-  status: OUTREACHED                       │  when lead   │
-  status: NEGOTIATING                      │  converts    │
-  status: WON ──────── conversion ────────►│  to WON      │
-  status: LOST                             └──────────────┘
-  status: EXPIRED
+  status: DEMO_BUILT                       │  created     │
+  status: OUTREACH_SENT                    │  when lead   │
+  status: REPLIED                          │  converts    │
+  status: CLOSED_WON ──── conversion ─────►│  to CLOSED_WON │
+  status: CLOSED_LOST                      └──────────────┘
+  status: DEMO_EXPIRED
 ```
 
 A Client row is created when:
-- An AgencyLead reaches status `WON`, OR
+- An AgencyLead reaches status `CLOSED_WON`, OR
 - A client is onboarded outside the pipeline (e.g., referral, existing relationship)
 
 The `originLeadId` column links back to the AgencyLead row if one exists. For clients acquired outside the pipeline, this is NULL.

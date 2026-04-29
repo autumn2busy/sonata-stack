@@ -276,7 +276,7 @@ function createServer(): McpServer {
         const lockRes = await passwordProtectDeployment("pay_flynerd_2026");
 
         for (const lead of expired) {
-          await updateLeadStatus(lead.id, "EXPIRED");
+          await updateLeadStatus(lead.id, "DEMO_EXPIRED");
         }
 
         return {
