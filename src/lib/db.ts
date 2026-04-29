@@ -156,3 +156,44 @@ export async function updateLeadStatus(leadId: string, status: AgencyLeadStatus)
   if (error) throw new Error(`Supabase status update failed: ${error.message}`);
   return data;
 }
+
+export async function appendOutreachAttempt(
+  leadId: string,
+  attempt: { contactId: string; dealId: string; walkthroughVideoUrl?: string },
+): Promise<void> {
+  const supabase = getSupabase();
+  const { data: lead, error: readError } = await supabase
+    .from("AgencyLead")
+    .select("outreachHistory")
+    .eq("id", leadId)
+    .single();
+
+  if (readError) {
+    throw new Error(`Supabase outreach history read failed: ${readError.message}`);
+  }
+
+  const existing = Array.isArray(lead?.outreachHistory)
+    ? lead.outreachHistory
+    : [];
+  const outreachHistory = [
+    ...existing,
+    {
+      timestamp: new Date().toISOString(),
+      contactId: attempt.contactId,
+      dealId: attempt.dealId,
+      walkthroughVideoUrl: attempt.walkthroughVideoUrl,
+    },
+  ];
+
+  const { error: updateError } = await supabase
+    .from("AgencyLead")
+    .update({
+      outreachHistory,
+      updatedAt: new Date().toISOString(),
+    })
+    .eq("id", leadId);
+
+  if (updateError) {
+    throw new Error(`Supabase outreach history append failed: ${updateError.message}`);
+  }
+}

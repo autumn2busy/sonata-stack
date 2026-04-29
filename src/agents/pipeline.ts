@@ -5,6 +5,7 @@ import { getCanonicalDemoUrl, triggerDeploy } from "../lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "../lib/heygen.js";
 import { classifyWebPresence, isQualifiedLead } from "../lib/qualification.js";
 import { generateDemoCopy } from "../lib/demoCopy.js";
+import { runColdOutreach } from "./outreach.js";
 
 // We need a helper to get Anthropic since it's used by yonce
 let _anthropic: Anthropic | null = null;
@@ -261,21 +262,36 @@ export async function execDre(leadId: string, businessName: string, niche: strin
     })
     .catch((err) => console.error("[Dre] HeyGen error (non-fatal):", err));
 
-  return { status: "DEMO_BUILT", leadId, businessName, demoSiteUrl, validUntil, deployTriggered: deployed, videoStatus: "generating", brandColors: intelDataForTemplate.brandColors };
+  return {
+    status: "DEMO_BUILT",
+    leadId,
+    businessName,
+    demoSiteUrl,
+    validUntil,
+    deployTriggered: deployed,
+    videoStatus: "generating",
+    walkthroughVideoUrl:
+      typeof payload.walkthroughVideoUrl === "string"
+        ? payload.walkthroughVideoUrl
+        : undefined,
+    brandColors: intelDataForTemplate.brandColors,
+  };
 }
 
-export async function execHovOutreach(leadId: string, businessName: string, contactEmail: string, niche: string, demoSiteUrl: string) {
-  // Reach out to flynerd-agency backend directly
-  const baseUrl = process.env.AGENCY_URL || "http://localhost:3000";
-  const res = await fetch(`${baseUrl}/api/agents/outreach`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ leadId, businessName, contactEmail, niche, demoSiteUrl })
+export async function execHovOutreach(
+  leadId: string,
+  businessName: string,
+  contactEmail: string | undefined,
+  niche: string,
+  demoSiteUrl: string,
+  walkthroughVideoUrl?: string,
+) {
+  return await runColdOutreach({
+    leadId,
+    businessName,
+    contactEmail,
+    niche,
+    demoSiteUrl,
+    walkthroughVideoUrl,
   });
-  
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Outreach Agent Failed (${res.status}): ${errText}`);
-  }
-  return await res.json();
 }

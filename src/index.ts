@@ -78,7 +78,14 @@ async function runTyrionJob(jobId: string, niche: string, city: string, minScore
             built++;
 
             if (lead.contactEmail) {
-              await execHovOutreach(lead.id, lead.businessName, lead.contactEmail, niche, dreOut.demoSiteUrl);
+              await execHovOutreach(
+                lead.id,
+                lead.businessName,
+                lead.contactEmail,
+                niche,
+                dreOut.demoSiteUrl,
+                dreOut.walkthroughVideoUrl,
+              );
               outreached++;
             } else {
               needsManualOutreach++;
