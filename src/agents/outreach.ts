@@ -16,6 +16,7 @@ import {
   AC_CONTACT_FIELD_AGENCY_LEAD_ID,
   AC_CONTACT_FIELD_DEMO_URL,
   AC_CONTACT_FIELD_NICHE,
+  AC_CONTACT_FIELD_QUALIFICATION_PROFILE,
   AC_DEAL_FIELD_BUSINESS_NAME,
   AC_DEAL_FIELD_INTEL_SCORE,
   AC_DEAL_FIELD_PAIN_POINTS,
@@ -27,6 +28,7 @@ import {
   AC_TAG_COLD_OUTREACH,
   AC_TAG_FLYNERD_OUTREACH_PENDING,
 } from "../lib/ac-constants.js";
+import { getQualificationProfile } from "../lib/profile.js";
 
 export interface RunColdOutreachInput {
   leadId: string;
@@ -99,11 +101,27 @@ export async function runColdOutreach(
   const normalizedNicheForContact = normalizeNiche(
     niche || (typeof lead?.niche === "string" ? lead.niche : ""),
   );
+  const intelDataForProfile =
+    lead?.intelData && typeof lead.intelData === "object"
+      ? (lead.intelData as Record<string, unknown>)
+      : {};
+  const qualificationProfile = getQualificationProfile({
+    niche: typeof lead?.niche === "string" ? lead.niche : (niche || ""),
+    intelData: intelDataForProfile,
+  });
+  console.error(
+    `[outreach] Qualification profile resolved: ${qualificationProfile} for leadId=${leadId}`,
+  );
   console.error(
     `[outreach] Writing contact fields. contactId=${contactId} agencyLeadId=${leadId} niche=${normalizedNicheForContact} demoUrl=${demoSiteUrl}`,
   );
   await Promise.all([
     updateContactField(contactId, AC_CONTACT_FIELD_AGENCY_LEAD_ID, leadId),
+    updateContactField(
+      contactId,
+      AC_CONTACT_FIELD_QUALIFICATION_PROFILE,
+      qualificationProfile,
+    ),
     normalizedNicheForContact
       ? updateContactField(
           contactId,

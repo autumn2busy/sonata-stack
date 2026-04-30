@@ -6,7 +6,15 @@ import express from "express";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { buildIntelPrompt } from "./lib/prompts.js";
-import { updateLeadAsAudited, updateLeadAsBuilt, getLeadById, insertLead, getExpiredLeads, updateLeadStatus } from "./lib/db.js";
+import {
+  updateLeadAsAudited,
+  updateLeadAsBuilt,
+  getLeadById,
+  insertLead,
+  getExpiredLeads,
+  updateLeadStatus,
+  getActiveNicheKeys,
+} from "./lib/db.js";
 import { getCanonicalDemoUrl, triggerDeploy, passwordProtectDeployment } from "./lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "./lib/heygen.js";
 import { classifyWebPresence, isQualifiedLead } from "./lib/qualification.js";
@@ -310,12 +318,27 @@ function createServer(): McpServer {
     "tyrion",
     "Master orchestrator. Coordinates the full outbound pipeline: runs Simon Cowell to find leads, passes to Yoncé for scoring, sends qualified leads to Dre for building, then triggers outreach. The smartest agent in the room.",
     {
-      niche: z.string().describe("Business niche to target"),
+      niche: z.string().describe(
+        "Business niche to target. Must be one of the active canonical keys from niche_config. " +
+          "Examples: hvac, roofing, solar, family-law, personal-injury, dentistry, med-spa. " +
+          "Do not use free-text descriptions like 'law firm' or 'HVAC company' — use the key exactly.",
+      ),
       city: z.string().describe("City to target"),
       minScore: z.number().optional().default(50).describe("Minimum Yoncé score to qualify (default: 50)"),
     },
     async ({ niche, city, minScore }) => {
       try {
+        const validNiches = await getActiveNicheKeys();
+        if (!validNiches.includes(niche)) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Invalid niche "${niche}". Valid active niches are: ${validNiches.join(", ")}`,
+            }],
+            isError: true,
+          };
+        }
+
         const now = new Date().toISOString();
         const jobId = crypto.randomUUID();
         tyrionJobs.set(jobId, {

@@ -4,6 +4,7 @@
 
 // Contact custom fields
 export const AC_CONTACT_FIELD_AGENCY_LEAD_ID = "165";
+export const AC_CONTACT_FIELD_QUALIFICATION_PROFILE = "164";
 export const AC_CONTACT_FIELD_NICHE = "167";
 export const AC_CONTACT_FIELD_DEMO_URL = "168";
 

@@ -12,6 +12,7 @@
     "build": "node scripts/check-status-literals.mjs && tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "seed:test-lead": "node scripts/seed-test-lead.mjs",
     "check:runtime-logs": "sh -c 'if rg -n \"console\\\\.log\" src/index.ts src/lib src/agents; then echo \"❌ runtime console.log detected in MCP server directories\"; exit 1; else echo \"✅ no runtime console.log in MCP server directories\"; fi'"
   },
   "keywords": [

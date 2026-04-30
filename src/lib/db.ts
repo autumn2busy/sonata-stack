@@ -4,6 +4,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import { AGENCY_LEAD_STATUSES, type AgencyLeadStatus } from "./status-contract.js";
+import { leadEventTypeForStatus, writeLeadEvent, type LeadEventPayload } from "./lead-events.js";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -17,6 +18,24 @@ function getSupabase(): SupabaseClient {
     _supabase = createClient(url, key);
   }
   return _supabase;
+}
+
+async function writeStatusEventBestEffort(
+  leadId: string,
+  status: AgencyLeadStatus,
+  payload: LeadEventPayload = {},
+): Promise<void> {
+  try {
+    await writeLeadEvent(
+      leadId,
+      leadEventTypeForStatus(status),
+      { status, ...payload },
+      "sonata",
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[LeadEvent] dual-write failed leadId=${leadId} status=${status}: ${message}`);
+  }
 }
 
 export async function updateLeadAsAudited(
@@ -43,6 +62,7 @@ export async function updateLeadAsAudited(
     .single();
 
   if (error) throw new Error(`Supabase update failed: ${error.message}`);
+  await writeStatusEventBestEffort(leadId, "AUDITED", { intelScore });
   return data;
 }
 
@@ -71,6 +91,11 @@ export async function updateLeadAsBuilt(
     .single();
 
   if (error) throw new Error(`Supabase update failed: ${error.message}`);
+  await writeStatusEventBestEffort(leadId, "DEMO_BUILT", {
+    demoSiteUrl: updates.demoSiteUrl,
+    validUntil: updates.validUntil,
+    hasWalkthroughVideoUrl: Boolean(updates.walkthroughVideoUrl),
+  });
   return data;
 }
 
@@ -84,6 +109,17 @@ export async function getLeadById(leadId: string) {
 
   if (error) throw new Error(`Supabase read failed: ${error.message}`);
   return data;
+}
+
+export async function getActiveNicheKeys(): Promise<string[]> {
+  const { data, error } = await getSupabase()
+    .from("niche_config")
+    .select("niche_key")
+    .eq("is_active", true)
+    .order("niche_key");
+
+  if (error) throw new Error(`Failed to load niche_config: ${error.message}`);
+  return (data ?? []).map((row: { niche_key: string }) => row.niche_key);
 }
 
 export async function insertLead(payload: {
@@ -105,6 +141,22 @@ export async function insertLead(payload: {
   }
   const status: AgencyLeadStatus = incomingStatus as AgencyLeadStatus;
 
+  const { data: nicheRow, error: nicheError } = await supabase
+    .from("niche_config")
+    .select("niche_key")
+    .eq("niche_key", payload.niche)
+    .maybeSingle();
+
+  if (nicheError) {
+    console.error(
+      `[insertLead] Warning: failed to validate niche "${payload.niche}" against niche_config: ${nicheError.message}`,
+    );
+  } else if (!nicheRow) {
+    console.error(
+      `[insertLead] Warning: niche "${payload.niche}" not found in niche_config. Lead will be inserted but downstream routing may fail.`,
+    );
+  }
+
   const { data, error } = await supabase
     .from("AgencyLead")
     .upsert({
@@ -123,6 +175,10 @@ export async function insertLead(payload: {
     .single();
 
   if (error) throw new Error(`Supabase insert failed: ${error.message}`);
+  await writeStatusEventBestEffort(data.id, status, {
+    niche: payload.niche,
+    placeId: payload.placeId,
+  });
   return data;
 }
 
@@ -154,6 +210,7 @@ export async function updateLeadStatus(leadId: string, status: AgencyLeadStatus)
     .single();
 
   if (error) throw new Error(`Supabase status update failed: ${error.message}`);
+  await writeStatusEventBestEffort(leadId, status);
   return data;
 }
 

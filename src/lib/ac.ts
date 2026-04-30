@@ -16,28 +16,42 @@ function getAcConfig() {
 }
 
 const NICHE_MAP: Record<string, string> = {
-  plumber: "Plumbing",
-  plumbers: "Plumbing",
-  plumbing: "Plumbing",
-  hvac: "HVAC",
-  heating: "HVAC",
-  "heating and cooling": "HVAC",
-  barber: "Barbershop",
-  barbershop: "Barbershop",
-  barbershops: "Barbershop",
-  electrician: "Electrical",
-  electrical: "Electrical",
-  roofer: "Roofing",
-  roofing: "Roofing",
-  painter: "Painting",
-  painting: "Painting",
-  landscaper: "Landscaping",
-  landscaping: "Landscaping",
-  pest: "Pest Control",
-  "pest control": "Pest Control",
-  cleaning: "Cleaning",
-  cleaner: "Cleaning",
-  "pressure washing": "Pressure Washing",
+  // Home services — underserved local
+  hvac:                    "hvac",
+  heating:                 "hvac",
+  "heating and cooling":   "hvac",
+  roofing:                 "roofing",
+  roofer:                  "roofing",
+  solar:                   "solar",
+  "solar panel":           "solar",
+  plumber:                 "plumbing",
+  plumbers:                "plumbing",
+  plumbing:                "plumbing",
+  "water damage":          "water damage",
+  "water-damage":          "water damage",
+  "senior home care":      "senior home care",
+  "senior-home-care":      "senior home care",
+
+  // Legal — all sub-niches collapse to one AC branch
+  "bankruptcy-law":        "legal",
+  "estate-planning":       "legal",
+  "family-law":            "legal",
+  "immigration-law":       "legal",
+  "personal-injury":       "legal",
+  "real-estate-law":       "legal",
+  "workers-comp":          "legal",
+
+  // Medical / tech-enabled premium
+  // Routes to "medical" — matches the future Cold Outreach Premium automation.
+  "med-spa":               "medical",
+  medspa:                  "medical",
+  dentistry:               "medical",
+  fertility:               "medical",
+  orthodontics:            "medical",
+  "trt-clinic":            "medical",
+  "dental-implants":       "medical",
+  "plastic-surgery":       "medical",
+  "weight-loss":           "medical",
 };
 
 export function normalizeNiche(raw: string): string {

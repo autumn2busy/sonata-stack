@@ -19,3 +19,4 @@ dist/
 # slips in via `git add .`. Only the shell scripts (ci-dist-guard.sh etc.)
 # are intended to be tracked under scripts/.
 /scripts/*.mjs
+!/scripts/seed-test-lead.mjs
