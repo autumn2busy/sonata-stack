@@ -26,7 +26,7 @@ Before any **agent implementation or refactor**: read the pipeline doc.
 
 **Sonata Stack** is the MCP server that runs FlyNerd's outbound agency pipeline. It exposes named agent tools (Simon, Yoncé, Dre, Hov, Tyrion, Kris, Cersei, Tiny, Kendrick) over Streamable HTTP. Railway hosts it. Claude.ai connects to it.
 
-**This is not the only writer.** A separate Next.js app (`flynerd-agency` repo) also writes to the same Supabase `"AgencyLead"` table from `app/api/agents/*`, `app/api/contact/`, `app/api/orchestrator/`, `app/api/webhooks/*`. **n8n** runs the `FlyNerd — AC Tag Sync to Supabase Status` workflow (id: `d42cyp27QDIqZczu`) which also writes status. Any rule that lives only in this file is a rule the other writers don't know about — flag cross-repo concerns explicitly.
+**This is not the only writer.** A separate Next.js app (`flynerd-agency` repo) also writes to the same Supabase `"AgencyLead"` table from `app/api/contact/`, `app/api/agents/closer`, `app/api/agents/expire`, and `app/api/webhooks/*`. The legacy agency scout/intel/build/outreach/growth/orchestrator routes were deleted after migrating orchestration into Sonata. **n8n** runs the `FlyNerd — AC Tag Sync to Supabase Status` workflow (id: `d42cyp27QDIqZczu`) which also writes status. Any rule that lives only in this file is a rule the other writers don't know about — flag cross-repo concerns explicitly.
 
 ---
 

@@ -100,10 +100,10 @@
 
 ## Repo Boundaries
 
-- **flynerd_agency** is NOT public-facing only. It runs agent and webhook logic in `app/api/agents/*`, `app/api/orchestrator/*`, `app/api/webhooks/*`. It writes directly to Supabase and AC. Treat it as a second agent runtime.
+- **flynerd_agency** is NOT public-facing only. It still runs `app/api/agents/closer`, `app/api/agents/expire`, contact routes, and webhooks that write directly to Supabase and AC. Legacy scout/intel/build/outreach/growth/orchestrator routes were deleted after the Sonata migration.
 - **sonata-stack** is the MCP server. Always-on, Railway-hosted.
 - **FN-real-estate** is DEPRECATED. Don't add code there.
-- The aspirational rule "The Face calls Sonata Stack via MCP, never the reverse" is **not yet true.** Until flynerd_agency's agent routes are migrated out, treat all three writers as live.
+- The aspirational rule "The Face calls Sonata Stack via MCP, never the reverse" is closer now: outbound orchestration lives in Sonata, but agency contact/webhook/closer/expire writes and n8n status writes are still live.
 
 ## Secrets Handling
 
