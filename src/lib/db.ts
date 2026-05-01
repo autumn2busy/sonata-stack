@@ -154,6 +154,79 @@ export async function createOffer(input: CreateOfferInput): Promise<void> {
   }
 }
 
+export async function getOfferByStripeSessionId(sessionId: string) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("Offer")
+    .select("*")
+    .eq("stripe_session_id", sessionId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase Offer read failed: ${error.message}`);
+  return data;
+}
+
+export async function paymentIntentEventExists(eventId: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("PaymentIntent")
+    .select("id")
+    .eq("stripe_event_id", eventId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase PaymentIntent read failed: ${error.message}`);
+  return !!data;
+}
+
+export interface CreatePaymentIntentInput {
+  offerId: string | null;
+  leadId: string;
+  stripePaymentIntentId: string | null;
+  stripeEventId: string;
+  stripeEventType: string;
+  amountCents: number | null;
+  currency: string | null;
+  status: string;
+  rawEvent: unknown;
+}
+
+export async function createPaymentIntentRecord(
+  input: CreatePaymentIntentInput,
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.from("PaymentIntent").insert({
+    offer_id: input.offerId,
+    lead_id: input.leadId,
+    stripe_payment_intent_id: input.stripePaymentIntentId,
+    stripe_event_id: input.stripeEventId,
+    stripe_event_type: input.stripeEventType,
+    amount_cents: input.amountCents,
+    currency: input.currency,
+    status: input.status,
+    raw_event: input.rawEvent,
+    created_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    throw new Error(`Supabase PaymentIntent insert failed: ${error.message}`);
+  }
+}
+
+export async function updateOfferStatusBySessionId(
+  stripeSessionId: string,
+  status: string,
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("Offer")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("stripe_session_id", stripeSessionId);
+
+  if (error) {
+    throw new Error(`Supabase Offer status update failed: ${error.message}`);
+  }
+}
+
 export async function insertLead(payload: {
   businessName: string;
   niche: string;

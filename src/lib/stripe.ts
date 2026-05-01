@@ -71,3 +71,14 @@ export async function createCloseCheckoutSession(
 
   return { sessionId: session.id, url: session.url };
 }
+
+export function verifyWebhookSignature(
+  rawBody: Buffer,
+  signature: string,
+): Stripe.Event {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new Error("[Stripe] STRIPE_WEBHOOK_SECRET required for webhook verification");
+  }
+  return getStripe().webhooks.constructEvent(rawBody, signature, secret);
+}

@@ -5,16 +5,22 @@ import Anthropic from "@anthropic-ai/sdk";
 import express from "express";
 import crypto from "node:crypto";
 import { z } from "zod";
+import type Stripe from "stripe";
 import { buildIntelPrompt } from "./lib/prompts.js";
 import {
+  createPaymentIntentRecord,
   updateLeadAsAudited,
   updateLeadAsBuilt,
   getLeadById,
+  getOfferByStripeSessionId,
   insertLead,
   getExpiredLeads,
+  paymentIntentEventExists,
   updateLeadStatus,
+  updateOfferStatusBySessionId,
   getActiveNicheKeys,
 } from "./lib/db.js";
+import { verifyWebhookSignature } from "./lib/stripe.js";
 import { getCanonicalDemoUrl, triggerDeploy, passwordProtectDeployment } from "./lib/vercel.js";
 import { generateAvatarVideo, buildVideoScript } from "./lib/heygen.js";
 import { classifyWebPresence, isQualifiedLead } from "./lib/qualification.js";
@@ -709,6 +715,154 @@ app.post(
     });
   },
 );
+
+// ─────────────────────────────────────────────
+// Stripe webhook — checkout.session.completed → CLOSED_WON
+//
+// Stripe verifies signatures using the raw request body, so this route
+// uses express.raw() — must NOT use express.json() here. Stripe will
+// retry until 2xx is returned, so idempotency is enforced via
+// PaymentIntent.stripe_event_id unique constraint.
+// ─────────────────────────────────────────────
+app.post(
+  "/webhooks/stripe",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const signature = req.headers["stripe-signature"];
+    if (!signature || typeof signature !== "string") {
+      console.error("[webhook/stripe] missing stripe-signature header");
+      res.status(400).json({ error: "Missing stripe-signature header" });
+      return;
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = verifyWebhookSignature(req.body as Buffer, signature);
+    } catch (err: any) {
+      console.error(
+        "[webhook/stripe] signature verification failed:",
+        err?.message || err,
+      );
+      res.status(400).json({
+        error: `Webhook signature verification failed: ${err?.message || err}`,
+      });
+      return;
+    }
+
+    console.error(
+      `[webhook/stripe] event received id=${event.id} type=${event.type}`,
+    );
+
+    // Idempotency check — Stripe retries on non-2xx, so a duplicate event
+    // is expected behavior and must return 200 without reprocessing.
+    try {
+      if (await paymentIntentEventExists(event.id)) {
+        console.error(
+          `[webhook/stripe] event ${event.id} already processed — returning 200`,
+        );
+        res.status(200).json({ received: true, idempotent: true });
+        return;
+      }
+    } catch (err: any) {
+      console.error(
+        "[webhook/stripe] idempotency check failed:",
+        err?.message || err,
+      );
+      res.status(500).json({ error: "Idempotency check failed" });
+      return;
+    }
+
+    if (event.type === "checkout.session.completed") {
+      try {
+        await handleCheckoutSessionCompleted(event);
+        res.status(200).json({ received: true });
+        return;
+      } catch (err: any) {
+        console.error(
+          `[webhook/stripe] checkout.session.completed handler failed eventId=${event.id}:`,
+          err?.message || err,
+        );
+        res.status(500).json({ error: err?.message || String(err) });
+        return;
+      }
+    }
+
+    // Unknown event type — acknowledge to stop Stripe retries, but skip processing.
+    console.error(
+      `[webhook/stripe] unhandled event type ${event.type} — acknowledging`,
+    );
+    res.status(200).json({ received: true, handled: false });
+  },
+);
+
+async function handleCheckoutSessionCompleted(
+  event: Stripe.Event,
+): Promise<void> {
+  const session = event.data.object as Stripe.Checkout.Session;
+  const agencyLeadId = session.metadata?.agencyLeadId;
+  const stripePaymentIntentId =
+    typeof session.payment_intent === "string" ? session.payment_intent : null;
+
+  // Missing metadata is a data shape issue, not a transient failure —
+  // do NOT 500 (Stripe would retry forever). Log + write forensic
+  // PaymentIntent + return.
+  if (!agencyLeadId) {
+    console.error(
+      `[webhook/stripe] checkout.session.completed missing metadata.agencyLeadId for session=${session.id} — recording forensic PaymentIntent and skipping lead conversion`,
+    );
+    await createPaymentIntentRecord({
+      offerId: null,
+      leadId: "unknown",
+      stripePaymentIntentId,
+      stripeEventId: event.id,
+      stripeEventType: event.type,
+      amountCents: session.amount_total ?? null,
+      currency: session.currency ?? null,
+      status: "succeeded_no_lead",
+      rawEvent: event,
+    });
+    return;
+  }
+
+  // Look up Offer (nullable — recovery scenario if Phase 2 write missed it)
+  const offer = await getOfferByStripeSessionId(session.id);
+  const offerId = offer?.id ?? null;
+  if (!offer) {
+    console.error(
+      `[webhook/stripe] no Offer row for session=${session.id} — proceeding without offer_id`,
+    );
+  }
+
+  await createPaymentIntentRecord({
+    offerId,
+    leadId: agencyLeadId,
+    stripePaymentIntentId,
+    stripeEventId: event.id,
+    stripeEventType: event.type,
+    amountCents: session.amount_total ?? null,
+    currency: session.currency ?? null,
+    status: "succeeded",
+    rawEvent: event,
+  });
+
+  if (offer) {
+    try {
+      await updateOfferStatusBySessionId(session.id, "paid");
+    } catch (err: any) {
+      console.error(
+        "[webhook/stripe] failed to update Offer.status (non-fatal):",
+        err?.message || err,
+      );
+    }
+  }
+
+  // updateLeadStatus dual-writes a CLOSED_WON LeadEvent automatically (Fix 4 Phase 2)
+  await updateLeadStatus(agencyLeadId, "CLOSED_WON");
+
+  console.error(
+    `[webhook/stripe] lead ${agencyLeadId} converted to CLOSED_WON via session=${session.id} eventId=${event.id}`,
+  );
+}
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
