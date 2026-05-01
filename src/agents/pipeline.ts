@@ -254,6 +254,31 @@ export async function execDre(leadId: string, businessName: string, niche: strin
             const sb = createClient(url, key);
             await sb.from("AgencyLead").update({ walkthroughVideoUrl: videoUrl, updatedAt: new Date().toISOString() }).eq("id", leadId);
             console.error(`[Dre] Video URL saved for ${businessName}: ${videoUrl}`);
+
+            // AC backfill — if outreach has already fired, the deal exists with field 17 empty.
+            // Look up the most recent dealId from outreachHistory and update the AC deal field.
+            try {
+              const { data: leadRow } = await sb
+                .from("AgencyLead")
+                .select("outreachHistory")
+                .eq("id", leadId)
+                .single();
+
+              const history = Array.isArray(leadRow?.outreachHistory) ? leadRow.outreachHistory : [];
+              const mostRecent = history[history.length - 1];
+              const dealId = mostRecent?.dealId;
+
+              if (dealId) {
+                const { updateDealField } = await import("../lib/ac.js");
+                const { AC_DEAL_FIELD_WALKTHROUGH_VIDEO_URL } = await import("../lib/ac-constants.js");
+                await updateDealField(String(dealId), AC_DEAL_FIELD_WALKTHROUGH_VIDEO_URL, videoUrl);
+                console.error(`[Dre] AC deal ${dealId} field ${AC_DEAL_FIELD_WALKTHROUGH_VIDEO_URL} backfilled with video URL`);
+              } else {
+                console.error(`[Dre] No dealId in outreachHistory yet — outreach will pick up walkthroughVideoUrl from DB when it runs`);
+              }
+            } catch (err) {
+              console.error("[Dre] AC walkthrough backfill failed (non-fatal):", err);
+            }
           }
         } catch (err) {
           console.error("[Dre] Failed to save video URL:", err);
