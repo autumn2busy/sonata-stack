@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { getLeadById } from "../lib/db.js";
+import { createOffer, getLeadById } from "../lib/db.js";
 import { createCloseCheckoutSession } from "../lib/stripe.js";
 import { updateContactField } from "../lib/ac.js";
 import {
@@ -133,14 +133,42 @@ export async function runKrisJennerClose(
       typeof dealValueDollars === "number" && dealValueDollars > 0
         ? Math.round(dealValueDollars * 100)
         : profileDefaultCents;
+    const productName = profileProductName(profile, businessName);
     const session = await createCloseCheckoutSession({
       dealId,
       agencyLeadId,
       businessName,
       amountCents,
-      productName: profileProductName(profile, businessName),
+      productName,
     });
     paymentLink = session.url;
+
+    // Write Offer row — best-effort, do not block the Stripe flow.
+    try {
+      await createOffer({
+        leadId: agencyLeadId,
+        profile,
+        amountCents,
+        productName,
+        stripeSessionId: session.sessionId,
+        stripeSessionUrl: session.url,
+        metadata: {
+          dealId,
+          acContactId: contactId,
+          source: "kris_jenner_close",
+        },
+      });
+      console.error(
+        `[Kris Jenner] Offer row written sessionId=${session.sessionId} leadId=${agencyLeadId}`,
+      );
+    } catch (err: any) {
+      console.error(
+        "[Kris Jenner] Offer row write failed (non-fatal):",
+        err?.message || err,
+      );
+      warnings.push("offer_row_write_failed");
+    }
+
     console.error(
       `[Kris Jenner] stripe session created id=${session.sessionId} profile=${profile} amountCents=${amountCents} (profileDefault=${profileDefaultCents})`,
     );

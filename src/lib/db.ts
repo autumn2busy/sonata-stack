@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import crypto from "node:crypto";
 import { AGENCY_LEAD_STATUSES, type AgencyLeadStatus } from "./status-contract.js";
 import { leadEventTypeForStatus, writeLeadEvent, type LeadEventPayload } from "./lead-events.js";
+import type { QualificationProfile } from "./profile.js";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -120,6 +121,37 @@ export async function getActiveNicheKeys(): Promise<string[]> {
 
   if (error) throw new Error(`Failed to load niche_config: ${error.message}`);
   return (data ?? []).map((row: { niche_key: string }) => row.niche_key);
+}
+
+export interface CreateOfferInput {
+  leadId: string;
+  profile: QualificationProfile;
+  amountCents: number;
+  productName: string;
+  stripeSessionId: string;
+  stripeSessionUrl: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function createOffer(input: CreateOfferInput): Promise<void> {
+  const supabase = getSupabase();
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("Offer").insert({
+    lead_id: input.leadId,
+    profile: input.profile,
+    amount_cents: input.amountCents,
+    product_name: input.productName,
+    stripe_session_id: input.stripeSessionId,
+    stripe_session_url: input.stripeSessionUrl,
+    status: "created",
+    metadata: input.metadata ?? {},
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (error) {
+    throw new Error(`Supabase Offer insert failed: ${error.message}`);
+  }
 }
 
 export async function insertLead(payload: {
