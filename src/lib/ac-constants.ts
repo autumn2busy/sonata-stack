@@ -10,7 +10,7 @@ export const AC_CONTACT_FIELD_DEMO_URL = "168";
 
 // Deal custom fields
 export const AC_DEAL_FIELD_WALKTHROUGH_VIDEO_URL = "17";
-export const AC_DEAL_FIELD_BUSINESS_NAME = "40";
+export const AC_DEAL_FIELD_BUSINESS_NAME = "21";
 export const AC_DEAL_FIELD_INTEL_SCORE = "19";
 export const AC_DEAL_FIELD_PAIN_POINTS = "20";
 
